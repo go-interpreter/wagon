@@ -14,16 +14,16 @@ import (
 // It returns the integer value, the size of the encoded value (in bytes), and
 // the error (if any).
 func ReadVarUint32Size(r io.Reader) (res uint32, size uint, err error) {
-	byte := make([]byte, 1)
+	b := make([]byte, 1)
 	var shift uint
 	for {
-		_, err := r.Read(byte)
-		if err != nil {
-			return 0, 0, err
+		if _, err = io.ReadFull(r, b); err != nil {
+			return
 		}
+
 		size++
 
-		cur := uint32(byte[0])
+		cur := uint32(b[0])
 		res |= (cur & 0x7f) << (shift)
 		if cur&0x80 == 0 {
 			return res, size, nil
@@ -61,16 +61,15 @@ func ReadVarint32(r io.Reader) (int32, error) {
 func ReadVarint64Size(r io.Reader) (res int64, size uint, err error) {
 	var shift uint
 	var sign int64 = -1
-	byte := make([]byte, 1)
+	b := make([]byte, 1)
 
 	for {
-		_, err = r.Read(byte)
-		if err != nil {
-			return 0, 0, err
+		if _, err = io.ReadFull(r, b); err != nil {
+			return
 		}
 		size++
 
-		cur := int64(byte[0])
+		cur := int64(b[0])
 		res |= (cur & 0x7f) << shift
 		shift += 7
 		sign <<= 7
