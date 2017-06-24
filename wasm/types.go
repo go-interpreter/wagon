@@ -1,3 +1,7 @@
+// Copyright 2017 The go-interpreter Authors.  All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 package wasm
 
 import (
@@ -120,7 +124,7 @@ func readFunction(r io.Reader) (FunctionSig, error) {
 	}
 	f.ParamTypes = make([]ValueType, paramCount)
 
-	for i := uint32(0); i < paramCount; i++ {
+	for i := range f.ParamTypes {
 		f.ParamTypes[i], err = readValueType(r)
 		if err != nil {
 			return f, err
@@ -132,12 +136,13 @@ func readFunction(r io.Reader) (FunctionSig, error) {
 		return f, err
 	}
 
-	for i := uint32(0); i < returnCount; i++ {
+	f.ReturnTypes = make([]ValueType, returnCount)
+	for i := range f.ReturnTypes {
 		vt, err := readValueType(r)
 		if err != nil {
 			return f, err
 		}
-		f.ReturnTypes = append(f.ReturnTypes, vt)
+		f.ReturnTypes[i] = vt
 	}
 
 	return f, nil
@@ -145,16 +150,15 @@ func readFunction(r io.Reader) (FunctionSig, error) {
 
 // GlobalVar describes the type and mutability of a declared global variable
 type GlobalVar struct {
-	// Type of the value
-	ContentType ValueType
-	Mutable     bool
+	Type    ValueType // Type of the value stored by the variable
+	Mutable bool      // Whether the value of the variable can be changed by the set_global operator
 }
 
 func readGlobalVar(r io.Reader) (*GlobalVar, error) {
 	g := &GlobalVar{}
 	var err error
 
-	g.ContentType, err = readValueType(r)
+	g.Type, err = readValueType(r)
 	if err != nil {
 		return nil, err
 	}
@@ -173,29 +177,38 @@ func readGlobalVar(r io.Reader) (*GlobalVar, error) {
 type Table struct {
 	// The type of elements
 	ElementType ElemType
-	Limits      *ResizableLimits
+	Limits      ResizableLimits
 }
 
-func readTable(r io.Reader) (Table, error) {
+func readTable(r io.Reader) (*Table, error) {
 	t := Table{}
 	var err error
 
 	t.ElementType, err = readElemType(r)
 	if err != nil {
-		return t, err
+		return nil, err
 	}
 
-	t.Limits, err = readResizableLimits(r)
-	return t, err
+	lims, err := readResizableLimits(r)
+	if err != nil {
+		return nil, err
+	}
+
+	t.Limits = *lims
+	return &t, err
 }
 
 type Memory struct {
-	Limits *ResizableLimits
+	Limits ResizableLimits
 }
 
-func readMemory(r io.Reader) (Memory, error) {
+func readMemory(r io.Reader) (*Memory, error) {
 	lim, err := readResizableLimits(r)
-	return Memory{lim}, err
+	if err != nil {
+		return nil, err
+	}
+
+	return &Memory{*lim}, nil
 }
 
 // External describes the kind of the entry being imported or exported.
@@ -228,36 +241,34 @@ func readExternal(r io.Reader) (External, error) {
 	return External(bytes[0]), err
 }
 
+// ResizableLimits describe the limit of a table or linear memory.
 type ResizableLimits struct {
-	// true if the maximum field is present
-	Flags bool
-	// initial length (in units of table elements or wasm pages)
-	Initial uint32
-	// non-nil if specified by flags
-	Maximum *uint32
+	Flags   uint32 // 1 if the Maximum field is valid
+	Initial uint32 // initial length (in units of table elements or wasm pages)
+	Maximum uint32 // If flags is 1, it describes the maximum size of the table or memory
 }
 
 func readResizableLimits(r io.Reader) (*ResizableLimits, error) {
 	lim := &ResizableLimits{
-		Maximum: nil,
+		Maximum: 0,
 	}
 	f, err := leb128.ReadVarUint32(r)
 	if err != nil {
 		return nil, err
 	}
 
-	lim.Flags = f == 1
+	lim.Flags = f
 	lim.Initial, err = leb128.ReadVarUint32(r)
 	if err != nil {
 		return nil, err
 	}
 
-	if lim.Flags {
+	if lim.Flags&0x1 != 0 {
 		m, err := leb128.ReadVarUint32(r)
 		if err != nil {
 			return nil, err
 		}
-		lim.Maximum = &m
+		lim.Maximum = m
 
 	}
 	return lim, nil

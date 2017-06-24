@@ -1,9 +1,14 @@
+// Copyright 2017 The go-interpreter Authors.  All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 package wasm
 
 import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 
@@ -19,11 +24,24 @@ const (
 	end       byte = 0x0b
 )
 
-var ErrEmptyInitExpr = errors.New("Initializer expression produces no value")
+var ErrEmptyInitExpr = errors.New("wasm: Initializer expression produces no value")
 
-func readInitExpr(reader io.Reader) ([]byte, error) {
+type InvalidInitExprOpError byte
+
+func (e InvalidInitExprOpError) Error() string {
+	return fmt.Sprintf("wasm: Invalid opcode in initializer expression: %#x", e)
+}
+
+type InvalidGlobalIndexError uint32
+
+func (e InvalidGlobalIndexError) Error() string {
+	return fmt.Sprintf("wasm: Invalid index to global index space: %#x", e)
+}
+
+func readInitExpr(r io.Reader) ([]byte, error) {
 	b := make([]byte, 1)
-	buf := bytes.NewBuffer([]byte{})
+	buf := new(bytes.Buffer)
+	r = io.TeeReader(r, buf)
 
 	// For reading an initializer expression, we parse bytes
 	// as if reading WASM code, but convert LEB128 encoded
@@ -34,52 +52,47 @@ func readInitExpr(reader io.Reader) ([]byte, error) {
 	// section is calling this.
 outer:
 	for {
-		_, err := io.ReadFull(reader, b)
+		_, err := io.ReadFull(r, b)
 		if err != nil {
-			return []byte{}, err
+			return nil, err
 		}
 
-		binary.Write(buf, binary.LittleEndian, b[0])
+		buf.WriteByte(b[0])
 		switch b[0] {
 		case i32Const:
-			i, err := leb128.ReadVarint32(reader)
+			_, err := leb128.ReadVarint32(r)
 			if err != nil {
-				return []byte{}, err
+				return nil, err
 			}
-			binary.Write(buf, binary.LittleEndian, i)
 		case i64Const:
-			i, err := leb128.ReadVarint64(reader)
+			_, err := leb128.ReadVarint64(r)
 			if err != nil {
-				return []byte{}, err
+				return nil, err
 			}
-			binary.Write(buf, binary.LittleEndian, i)
 		case f32Const:
 			var i uint64
-			if err := binary.Read(reader, binary.LittleEndian, &i); err != nil {
-				return []byte{}, err
+			if err := binary.Read(r, binary.LittleEndian, &i); err != nil {
+				return nil, err
 			}
-			binary.Write(buf, binary.LittleEndian, i)
 		case f64Const:
 			var i uint64
-			if err := binary.Read(reader, binary.LittleEndian, &i); err != nil {
-				return []byte{}, err
+			if err := binary.Read(r, binary.LittleEndian, &i); err != nil {
+				return nil, err
 			}
-			binary.Write(buf, binary.LittleEndian, i)
 		case getGlobal:
-			index, err := leb128.ReadVarUint32(reader)
+			_, err := leb128.ReadVarUint32(r)
 			if err != nil {
-				return []byte{}, err
+				return nil, err
 			}
-			binary.Write(buf, binary.LittleEndian, index)
 		case end:
 			break outer
 		default:
-			return []byte{}, errors.New("Invalid opecode in initializer expression")
+			return nil, InvalidInitExprOpError(b[0])
 		}
 	}
 
 	if buf.Len() == 0 {
-		return []byte{}, ErrEmptyInitExpr
+		return nil, ErrEmptyInitExpr
 	}
 
 	return buf.Bytes(), nil
@@ -91,32 +104,29 @@ outer:
 func (m *Module) execInitExpr(expr []byte) (interface{}, error) {
 	var stack []uint64
 	var lastVal ValueType
-	reader := bytes.NewReader(expr)
+	r := bytes.NewReader(expr)
 
-	if reader.Len() == 0 {
+	if r.Len() == 0 {
 		return nil, ErrEmptyInitExpr
 	}
 
 	for {
-		byte, err := reader.ReadByte()
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
+		b, err := r.ReadByte()
+		if err == io.EOF {
+			break
+		} else if err != nil {
 			return nil, err
 		}
-		switch byte {
+		switch b {
 		case i32Const:
-			var i int32
-			err := binary.Read(reader, binary.LittleEndian, &i)
+			i, err := leb128.ReadVarint32(r)
 			if err != nil {
 				return nil, err
 			}
 			stack = append(stack, uint64(i))
 			lastVal = ValueTypeI32
 		case i64Const:
-			var i int64
-			err := binary.Read(reader, binary.LittleEndian, &i)
+			i, err := leb128.ReadVarint64(r)
 			if err != nil {
 				return nil, err
 			}
@@ -124,34 +134,32 @@ func (m *Module) execInitExpr(expr []byte) (interface{}, error) {
 			lastVal = ValueTypeI64
 		case f32Const:
 			var i uint64
-			if err := binary.Read(reader, binary.LittleEndian, &i); err != nil {
+			if err := binary.Read(r, binary.LittleEndian, &i); err != nil {
 				return nil, err
 			}
 			stack = append(stack, i)
 			lastVal = ValueTypeF32
 		case f64Const:
 			var i uint64
-			if err := binary.Read(reader, binary.LittleEndian, &i); err != nil {
+			if err := binary.Read(r, binary.LittleEndian, &i); err != nil {
 				return nil, err
 			}
 			stack = append(stack, i)
 			lastVal = ValueTypeF64
 		case getGlobal:
-			var index uint32
-			err := binary.Read(reader, binary.LittleEndian, &index)
+			index, err := leb128.ReadVarUint32(r)
 			if err != nil {
 				return nil, err
 			}
-
 			globalVar := m.GetGlobal(int(index))
 			if globalVar == nil {
-				return nil, errors.New("Invalid index to global index space")
+				return nil, InvalidGlobalIndexError(index)
 			}
-			lastVal = globalVar.Type.ContentType
+			lastVal = globalVar.Type.Type
 		case end:
 			break
 		default:
-			return nil, errors.New("Invalid opcode in initializer expression")
+			return nil, InvalidInitExprOpError(b)
 		}
 	}
 
@@ -166,6 +174,6 @@ func (m *Module) execInitExpr(expr []byte) (interface{}, error) {
 	case ValueTypeF64:
 		return math.Float64frombits(uint64(v)), nil
 	default:
-		panic("Invalid lastVal value")
+		panic(fmt.Sprintf("Invalid value type produced by initializer expression: %d", int8(lastVal)))
 	}
 }

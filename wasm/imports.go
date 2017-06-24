@@ -1,3 +1,7 @@
+// Copyright 2017 The go-interpreter Authors.  All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 package wasm
 
 import (
@@ -5,27 +9,83 @@ import (
 	"fmt"
 )
 
-// ImportEntry describes an import statement in a Wasm module.
-type ImportEntry struct {
-	// module name string
-	ModuleStr string
-	/// field name string
-	FieldStr string
-	Kind     External
-
-	// If Kind is Function, Type is a uint32 containing the type index of the function signature
-	// If Kind is Table, Type is a Table containing the type of the imported table
-	// If Kind is Memory, Type is a Memory containing the type of the imported memory
-	// If the Kind is Global, Type is a GlobalVar
-	Type interface{}
+// Import is an intreface implemented by types that can be imported by a WebAssembly module.
+type Import interface {
+	isImport()
 }
 
-var ImportMutGlobalError = errors.New("wasm: cannot import global mutable variable")
+// ImportEntry describes an import statement in a Wasm module.
+type ImportEntry struct {
+	ModuleName string // module name string
+	FieldName  string // field name string
+	Kind       External
 
-type ErrInvalidExternal uint8
+	// If Kind is Function, Type is a FuncImport containing the type index of the function signature
+	// If Kind is Table, Type is a TableImport containing the type of the imported table
+	// If Kind is Memory, Type is a MemoryImport containing the type of the imported memory
+	// If the Kind is Global, Type is a GlobalVarImport
+	Type Import
+}
 
-func (e ErrInvalidExternal) Error() string {
+type FuncImport struct {
+	Type uint32
+}
+
+func (FuncImport) isImport() {}
+
+type TableImport struct {
+	Type Table
+}
+
+func (TableImport) isImport() {}
+
+type MemoryImport struct {
+	Type Memory
+}
+
+func (MemoryImport) isImport() {}
+
+type GlobalVarImport struct {
+	Type GlobalVar
+}
+
+func (GlobalVarImport) isImport() {}
+
+var (
+	ErrImportMutGlobal           = errors.New("wasm: cannot import global mutable variable")
+	ErrNoExportsInImportedModule = errors.New("wasm: imported module has no exports")
+)
+
+type InvalidExternalError uint8
+
+func (e InvalidExternalError) Error() string {
 	return fmt.Sprintf("wasm: invalid external_kind value %d", uint8(e))
+}
+
+type ExportNotFoundError struct {
+	ModuleName string
+	FieldName  string
+}
+
+type KindMismatchError struct {
+	ModuleName string
+	FieldName  string
+	Import     External
+	Export     External
+}
+
+func (e KindMismatchError) Error() string {
+	return fmt.Sprintf("wasm: Mismatching import and export external kind values for %s.%s (%v, %v)", e.FieldName, e.ModuleName, e.Import, e.Export)
+}
+
+func (e ExportNotFoundError) Error() string {
+	return fmt.Sprintf("wasm: couldn't find export with name %s in module %s", e.FieldName, e.ModuleName)
+}
+
+type InvalidFunctionIndexError uint32
+
+func (e InvalidFunctionIndexError) Error() string {
+	return fmt.Sprintf("wasm: Invalid index to function index space: %#x", e)
 }
 
 func (module *Module) resolveImports(resolve ResolveFunc) error {
@@ -36,28 +96,33 @@ func (module *Module) resolveImports(resolve ResolveFunc) error {
 	modules := make(map[string]*Module)
 
 	for _, importEntry := range module.Import.Entries {
-		importedModule, ok := modules[importEntry.ModuleStr]
+		importedModule, ok := modules[importEntry.ModuleName]
 		if !ok {
 			var err error
-			importedModule, err = resolve(importEntry.ModuleStr)
+			importedModule, err = resolve(importEntry.ModuleName)
 			if err != nil {
 				return err
 			}
 
-			modules[importEntry.ModuleStr] = importedModule
+			modules[importEntry.ModuleName] = importedModule
 		}
 
 		if importedModule.Export == nil {
-			return errors.New("Couldn't import field.")
+			return ErrNoExportsInImportedModule
 		}
 
-		exportEntry, ok := importedModule.Export.Entries[importEntry.FieldStr]
+		exportEntry, ok := importedModule.Export.Entries[importEntry.FieldName]
 		if !ok {
-			return errors.New("Couldn't import field.")
+			return ExportNotFoundError{importEntry.ModuleName, importEntry.FieldName}
 		}
 
 		if exportEntry.Kind != importEntry.Kind {
-			return errors.New("Mismatch import and export kinds")
+			return KindMismatchError{
+				FieldName:  importEntry.FieldName,
+				ModuleName: importEntry.ModuleName,
+				Import:     importEntry.Kind,
+				Export:     exportEntry.Kind,
+			}
 		}
 
 		index := exportEntry.Index
@@ -66,19 +131,16 @@ func (module *Module) resolveImports(resolve ResolveFunc) error {
 		case ExternalFunction:
 			fn := importedModule.GetFunction(int(index))
 			if fn == nil {
-				return errors.New("Invalid index for exported function")
-			}
-			if fn.body == nil {
-				return errors.New("Imported function doesn't have a resolved body")
+				return InvalidFunctionIndexError(index)
 			}
 			module.FunctionIndexSpace = append(module.FunctionIndexSpace, *fn)
 		case ExternalGlobal:
 			glb := importedModule.GetGlobal(int(index))
 			if glb == nil {
-				return errors.New("Invalid index for exported global")
+				return InvalidGlobalIndexError(index)
 			}
 			if glb.Type.Mutable {
-				return ImportMutGlobalError
+				return ErrImportMutGlobal
 			}
 			module.GlobalIndexSpace = append(module.GlobalIndexSpace, *glb)
 
@@ -86,16 +148,16 @@ func (module *Module) resolveImports(resolve ResolveFunc) error {
 			// We check it against the length of the index space anyway.
 		case ExternalTable:
 			if int(index) >= len(importedModule.TableIndexSpace) {
-				return errors.New("Invalid index for table index space")
+				return InvalidTableIndexError(index)
 			}
 			module.TableIndexSpace[0] = importedModule.TableIndexSpace[0]
 		case ExternalMemory:
 			if int(index) >= len(importedModule.LinearMemoryIndexSpace) {
-				return errors.New("Invalid index for linear memory index space")
+				return InvalidLinearMemoryIndexError(index)
 			}
 			module.LinearMemoryIndexSpace[0] = importedModule.LinearMemoryIndexSpace[0]
 		default:
-			return errors.New("Invalid value for external_kind.")
+			return InvalidExternalError(exportEntry.Kind)
 		}
 
 	}

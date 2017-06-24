@@ -1,3 +1,7 @@
+// Copyright 2017 The go-interpreter Authors.  All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 package wasm
 
 import (
@@ -5,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 
 	"github.com/go-interpreter/wagon/wasm/internal/readpos"
 	"github.com/go-interpreter/wagon/wasm/leb128"
@@ -29,6 +32,27 @@ const (
 	SectionIDData     SectionID = 11
 )
 
+func (s SectionID) String() string {
+	n, ok := map[SectionID]string{
+		SectionIDCustom:   "custom",
+		SectionIDType:     "type",
+		SectionIDImport:   "import",
+		SectionIDFunction: "function",
+		SectionIDTable:    "table",
+		SectionIDMemory:   "memory",
+		SectionIDGlobal:   "global",
+		SectionIDExport:   "export",
+		SectionIDStart:    "start",
+		SectionIDElement:  "element",
+		SectionIDCode:     "code",
+		SectionIDData:     "data",
+	}[s]
+	if !ok {
+		return "unknown"
+	}
+	return n
+}
+
 // Section is a declared section in a WASM module.
 type Section struct {
 	Start int64
@@ -42,27 +66,36 @@ type Section struct {
 	Bytes []byte
 }
 
-type ErrInvalidSectionID SectionID
+type InvalidSectionIDError SectionID
 
-func (e ErrInvalidSectionID) Error() string {
+func (e InvalidSectionIDError) Error() string {
 	return fmt.Sprintf("wasm: invalid section ID %d", e)
 }
 
 var ErrUnsupportedSection = errors.New("wasm: unsupported section")
 
+type MissingSectionError SectionID
+
+func (e MissingSectionError) Error() string {
+	return fmt.Sprintf("wasm: missing section %s", SectionID(e).String())
+}
+
+// reads a valid section from r. The first return value is true if and only if
+// the module has been completely read.
 func (m *Module) readSection(r *readpos.ReadPos) (bool, error) {
-	s := Section{}
 	var err error
 	var id uint32
 
+	logger.Println("Reading section ID")
 	if id, err = leb128.ReadVarUint32(r); err != nil {
-		if err == io.EOF {
+		if err == io.EOF { // no bytes were read, the reader is empty
 			return true, nil
 		}
 		return false, err
 	}
-	s.ID = SectionID(id)
+	s := Section{ID: SectionID(id)}
 
+	logger.Println("Reading payload length")
 	if s.PayloadLen, err = leb128.ReadVarUint32(r); err != nil {
 		return false, nil
 	}
@@ -75,7 +108,7 @@ func (m *Module) readSection(r *readpos.ReadPos) (bool, error) {
 			return false, err
 		}
 		payloadDataLen -= uint32(nameLenSize)
-		if s.Name, err = readString(r, uint(nameLen)); err != nil {
+		if s.Name, err = readString(r, int(nameLen)); err != nil {
 			return false, err
 		}
 
@@ -86,23 +119,13 @@ func (m *Module) readSection(r *readpos.ReadPos) (bool, error) {
 
 	s.Start = r.CurPos
 
-	s.Bytes = make([]byte, payloadDataLen)
-	_, err = io.ReadFull(r, s.Bytes)
-	if err != nil {
-		return false, err
-	}
-
-	s.End = r.CurPos
-
-	sectionReader := bytes.NewReader(s.Bytes)
+	sectionBytes := new(bytes.Buffer)
+	sectionBytes.Grow(int(payloadDataLen))
+	sectionReader := io.LimitReader(io.TeeReader(r, sectionBytes), int64(payloadDataLen))
 
 	switch s.ID {
 	case SectionIDCustom:
 		logger.Println("section custom")
-		if s.Name == "name" {
-
-		}
-		break
 		// TODO: Read custom sections
 	case SectionIDType:
 		logger.Println("section type")
@@ -160,9 +183,13 @@ func (m *Module) readSection(r *readpos.ReadPos) (bool, error) {
 			m.Data.Section = s
 		}
 	default:
-		return false, ErrInvalidSectionID(s.ID)
+		return false, InvalidSectionIDError(s.ID)
 	}
 
+	s.End = r.CurPos
+	s.Bytes = sectionBytes.Bytes()
+
+	logger.Println(err)
 	return false, err
 }
 
@@ -181,7 +208,7 @@ func (m *Module) readSectionTypes(r io.Reader) error {
 
 	s.Entries = make([]FunctionSig, int(count))
 
-	for i := uint32(0); i < count; i++ {
+	for i := range s.Entries {
 		if s.Entries[i], err = readFunction(r); err != nil {
 			return err
 		}
@@ -207,8 +234,7 @@ func (m *Module) readSectionImports(r io.Reader) error {
 	}
 	s.Entries = make([]ImportEntry, count)
 
-	for i := uint32(0); i < count; i++ {
-		var err error
+	for i := range s.Entries {
 		s.Entries[i], err = readImportEntry(r)
 		if err != nil {
 			return err
@@ -227,7 +253,7 @@ func readImportEntry(r io.Reader) (ImportEntry, error) {
 		return i, err
 	}
 
-	if i.ModuleStr, err = readString(r, uint(modLen)); err != nil {
+	if i.ModuleName, err = readString(r, int(modLen)); err != nil {
 		return i, err
 	}
 
@@ -236,7 +262,7 @@ func readImportEntry(r io.Reader) (ImportEntry, error) {
 		return i, err
 	}
 
-	if i.FieldStr, err = readString(r, uint(fieldLen)); err != nil {
+	if i.FieldName, err = readString(r, int(fieldLen)); err != nil {
 		return i, err
 	}
 
@@ -244,26 +270,38 @@ func readImportEntry(r io.Reader) (ImportEntry, error) {
 		return i, err
 	}
 
-	var ptr *GlobalVar
-
 	switch i.Kind {
 	case ExternalFunction:
 		logger.Println("importing function")
-		i.Type, err = leb128.ReadVarUint32(r)
+		var t uint32
+		t, err = leb128.ReadVarUint32(r)
+		i.Type = FuncImport{t}
 	case ExternalTable:
 		logger.Println("importing table")
-		i.Type, err = readTable(r)
+		var table *Table
+
+		table, err = readTable(r)
+		if table != nil {
+			i.Type = TableImport{*table}
+		}
 	case ExternalMemory:
 		logger.Println("importing memory")
-		i.Type, err = readMemory(r)
+		var mem *Memory
+
+		mem, err = readMemory(r)
+		if mem != nil {
+			i.Type = MemoryImport{*mem}
+		}
 	case ExternalGlobal:
 		logger.Println("importing global var")
-		ptr, err = readGlobalVar(r)
-		if ptr != nil {
-			i.Type = *ptr
+		var gl *GlobalVar
+		gl, err = readGlobalVar(r)
+		if gl != nil {
+			i.Type = GlobalVarImport{*gl}
 		}
+
 	default:
-		return i, ErrInvalidExternal(i.Kind)
+		return i, InvalidExternalError(i.Kind)
 	}
 
 	return i, err
@@ -283,12 +321,14 @@ func (m *Module) readSectionFunctions(r io.Reader) error {
 		return err
 	}
 
-	for i := uint32(0); i < count; i++ {
+	s.Types = make([]uint32, count)
+
+	for i := range s.Types {
 		t, err := leb128.ReadVarUint32(r)
 		if err != nil {
 			return err
 		}
-		s.Types = append(s.Types, t)
+		s.Types[i] = t
 	}
 
 	m.Function = s
@@ -309,11 +349,12 @@ func (m *Module) readSectionTables(r io.Reader) error {
 	}
 	s.Entries = make([]Table, count)
 
-	for i := uint32(0); i < count; i++ {
-		s.Entries[i], err = readTable(r)
+	for i := range s.Entries {
+		t, err := readTable(r)
 		if err != nil {
 			return err
 		}
+		s.Entries[i] = *t
 	}
 
 	m.Table = s
@@ -335,11 +376,12 @@ func (m *Module) readSectionMemories(r io.Reader) error {
 
 	s.Entries = make([]Memory, count)
 
-	for i := uint32(0); i < count; i++ {
-		s.Entries[i], err = readMemory(r)
+	for i := range s.Entries {
+		m, err := readMemory(r)
 		if err != nil {
 			return err
 		}
+		s.Entries[i] = *m
 	}
 
 	m.Memory = s
@@ -362,7 +404,7 @@ func (m *Module) readSectionGlobals(r io.Reader) error {
 	s.Globals = make([]GlobalEntry, count)
 
 	logger.Printf("%d global entries\n", count)
-	for i := uint32(0); i < count; i++ {
+	for i := range s.Globals {
 		s.Globals[i], err = readGlobalEntry(r)
 		if err != nil {
 			return err
@@ -375,8 +417,8 @@ func (m *Module) readSectionGlobals(r io.Reader) error {
 
 // GlobalEntry declares a global variable.
 type GlobalEntry struct {
-	Type *GlobalVar // GlobalVar value stores the type and mutability of the var
-	Init []byte     // Init stores the initial value of the global variable
+	Type *GlobalVar // Type holds information about the value type and mutability of the variable
+	Init []byte     // Init is an initializer expression that computes the initial value of the variable
 }
 
 func readGlobalEntry(r io.Reader) (e GlobalEntry, err error) {
@@ -400,6 +442,12 @@ type SectionExports struct {
 	Entries map[string]ExportEntry
 }
 
+type DuplicateExportError string
+
+func (e DuplicateExportError) Error() string {
+	return fmt.Sprintf("Duplicate export entry: %s", e)
+}
+
 func (m *Module) readSectionExports(r io.Reader) error {
 	s := &SectionExports{}
 	count, err := leb128.ReadVarUint32(r)
@@ -415,7 +463,7 @@ func (m *Module) readSectionExports(r io.Reader) error {
 		}
 
 		if _, exists := s.Entries[entry.FieldStr]; exists {
-			return errors.New("Duplicate export entry.")
+			return DuplicateExportError(entry.FieldStr)
 		}
 		s.Entries[entry.FieldStr] = entry
 	}
@@ -435,7 +483,7 @@ func readExportEntry(r io.Reader) (ExportEntry, error) {
 	e := ExportEntry{}
 	fieldLen, err := leb128.ReadVarUint32(r)
 
-	if e.FieldStr, err = readString(r, uint(fieldLen)); err != nil {
+	if e.FieldStr, err = readString(r, int(fieldLen)); err != nil {
 		return e, err
 	}
 
@@ -451,7 +499,7 @@ func readExportEntry(r io.Reader) (ExportEntry, error) {
 // SectionStartFunction represents the start function section.
 type SectionStartFunction struct {
 	Section
-	Index uint32 // The function index of the start function
+	Index uint32 // The index of the start function into the global index space.
 }
 
 func (m *Module) readSectionStart(r io.Reader) error {
@@ -481,7 +529,7 @@ func (m *Module) readSectionElements(r io.Reader) error {
 	}
 	s.Entries = make([]ElementSegment, count)
 
-	for i := uint32(0); i < count; i++ {
+	for i := range s.Entries {
 		s.Entries[i], err = readElementSegment(r)
 		if err != nil {
 			return err
@@ -492,11 +540,10 @@ func (m *Module) readSectionElements(r io.Reader) error {
 	return nil
 }
 
+// ElementSegment describes a group of repeated elements that begin at a specified offset
 type ElementSegment struct {
-	// should be 0
-	Index uint32
-	// should return i32, computes the offset at which to place the elements
-	Offset []byte
+	Index  uint32 // The index into the global table space, should always be 0 in the MVP.
+	Offset []byte // initializer expression for computing the offset for placing elements, should return an i32 value
 	Elems  []uint32
 }
 
@@ -515,13 +562,14 @@ func readElementSegment(r io.Reader) (ElementSegment, error) {
 	if err != nil {
 		return s, err
 	}
+	s.Elems = make([]uint32, numElems)
 
-	for i := uint32(0); i < numElems; i++ {
+	for i := range s.Elems {
 		e, err := leb128.ReadVarUint32(r)
 		if err != nil {
 			return s, err
 		}
-		s.Elems = append(s.Elems, e)
+		s.Elems[i] = e
 	}
 
 	return s, nil
@@ -543,30 +591,29 @@ func (m *Module) readSectionCode(r io.Reader) error {
 	s.Bodies = make([]FunctionBody, count)
 	logger.Printf("%d function bodies\n", count)
 
-	for i := uint32(0); i < count; i++ {
+	for i := range s.Bodies {
 		logger.Printf("Reading function %d\n", i)
 		if s.Bodies[i], err = readFunctionBody(r); err != nil {
 			return err
 		}
 		s.Bodies[i].Module = m
-
 	}
 
 	m.Code = s
 	if m.Function == nil || len(m.Function.Types) == 0 {
-		return errors.New("Missing section: function")
+		return MissingSectionError(SectionIDFunction)
 	}
 	if len(m.Function.Types) != len(s.Bodies) {
 		return errors.New("The number of entries in the function and code section are unequal")
 	}
 
 	if m.Types == nil {
-		return errors.New("Missing section: type")
+		return MissingSectionError(SectionIDType)
 	}
 
 	for _, index := range m.Function.Types {
 		if int(index) >= len(m.Types.Entries) {
-			return errors.New("Invalid index")
+			return InvalidFunctionIndexError(index)
 		}
 
 		m.Types.Entries[index].body = &s.Bodies[index]
@@ -575,10 +622,14 @@ func (m *Module) readSectionCode(r io.Reader) error {
 	return nil
 }
 
+var ErrFunctionNoEnd = errors.New("Function body does not end with 0x0b (end)")
+
 type FunctionBody struct {
-	Module *Module // The parent module containing this function body, for execution purposes
-	Locals []LocalEntry
-	Code   []byte
+	Module         *Module // The parent module containing this function body, for execution purposes
+	Locals         []LocalEntry
+	Code           []byte
+	MaxDepth       int // the maximum stack depth that can be reached while executing this body
+	TotalLocalVars int // the total number of local variables used by this body
 }
 
 func readFunctionBody(r io.Reader) (FunctionBody, error) {
@@ -589,39 +640,43 @@ func readFunctionBody(r io.Reader) (FunctionBody, error) {
 		return f, err
 	}
 
-	r = io.LimitReader(r, int64(bodySize))
+	body := make([]byte, bodySize)
 
-	localCount, err := leb128.ReadVarUint32(r)
+	if _, err = io.ReadFull(r, body); err != nil {
+		return f, err
+	}
+
+	bytesReader := bytes.NewBuffer(body)
+
+	localCount, err := leb128.ReadVarUint32(bytesReader)
 	if err != nil {
 		return f, err
 	}
 	f.Locals = make([]LocalEntry, localCount)
 
-	for i := uint32(0); i < localCount; i++ {
-		if f.Locals[i], err = readLocalEntry(r); err != nil {
+	for i := range f.Locals {
+		if f.Locals[i], err = readLocalEntry(bytesReader); err != nil {
 			return f, err
 		}
 	}
 
 	logger.Printf("bodySize: %d, localCount: %d\n", bodySize, localCount)
 
-	code, err := ioutil.ReadAll(r)
+	code := bytesReader.Bytes()
+	logger.Printf("Read %d bytes for function body", len(code))
 
 	if code[len(code)-1] != end {
-		return f, errors.New("Function body does not end with 0x0b (end)")
+		return f, ErrFunctionNoEnd
 	}
 
 	f.Code = code[:len(code)-1]
-	if err != nil {
-		return f, err
-	}
 
 	return f, nil
 }
 
 type LocalEntry struct {
-	Count uint32
-	Type  ValueType
+	Count uint32    // The total number of local variables of the given Type used in the function body
+	Type  ValueType // The type of value stored by the variable
 }
 
 func readLocalEntry(r io.Reader) (LocalEntry, error) {
@@ -656,7 +711,7 @@ func (m *Module) readSectionData(r io.Reader) error {
 
 	s.Entries = make([]DataSegment, count)
 
-	for i := uint32(0); i < count; i++ {
+	for i := range s.Entries {
 		if s.Entries[i], err = readDataSegment(r); err != nil {
 			return err
 		}
@@ -666,10 +721,10 @@ func (m *Module) readSectionData(r io.Reader) error {
 	return err
 }
 
+// DataSegment describes a group of repeated elements that begin at a specified offset in the linear memory
 type DataSegment struct {
-	Index uint32
-	// should return i32, computes the offset at which to place the elements
-	Offset []byte
+	Index  uint32 // The index into the global linear memory space, should always be 0 in the MVP.
+	Offset []byte // initializer expression for computing the offset for placing elements, should return an i32 value
 	Data   []byte
 }
 
@@ -688,7 +743,7 @@ func readDataSegment(r io.Reader) (DataSegment, error) {
 	if err != nil {
 		return s, err
 	}
-	s.Data, err = readBytes(r, uint(size))
+	s.Data, err = readBytes(r, int(size))
 
 	return s, err
 }

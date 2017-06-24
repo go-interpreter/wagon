@@ -1,25 +1,49 @@
+// Copyright 2017 The go-interpreter Authors.  All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 package wasm
 
 import (
-	"errors"
+	"fmt"
+	"reflect"
 )
+
+type InvalidTableIndexError uint32
+
+func (e InvalidTableIndexError) Error() string {
+	return fmt.Sprintf("wasm: Invalid table to table index space: %d", uint32(e))
+}
+
+type InvalidValueTypeInitExprError struct {
+	Wanted reflect.Kind
+	Got    reflect.Kind
+}
+
+func (e InvalidValueTypeInitExprError) Error() string {
+	return fmt.Sprintf("wasm: Wanted initializer expression to return %v value, got %v", e.Wanted, e.Got)
+}
+
+type InvalidLinearMemoryIndexError uint32
+
+func (e InvalidLinearMemoryIndexError) Error() string {
+	return fmt.Sprintf("wasm: Invalid linear memory index: %d", uint32(e))
+}
 
 // Functions for populating and looking up entries in a module's index space.
 // More info: http://webassembly.org/docs/modules/#function-index-space
 
 func (m *Module) populateFunctions() error {
-	if m.Types == nil {
+	if m.Types == nil || m.Function == nil {
 		return nil
 	}
 
-	if m.Function != nil {
-		for _, index := range m.Function.Types {
-			if int(index) >= len(m.Types.Entries) {
-				return errors.New("Invalid type index")
-			}
-
-			m.FunctionIndexSpace = append(m.FunctionIndexSpace, m.Types.Entries[int(index)])
+	for _, index := range m.Function.Types {
+		if int(index) >= len(m.Types.Entries) {
+			return InvalidFunctionIndexError(index)
 		}
+
+		m.FunctionIndexSpace = append(m.FunctionIndexSpace, m.Types.Entries[int(index)])
 	}
 
 	return nil
@@ -64,7 +88,7 @@ func (m *Module) populateTables() error {
 		// the MVP dictates that index should always be zero, we shuold
 		// probably check this
 		if int(elem.Index) >= len(m.TableIndexSpace) {
-			return errors.New("Invalid index to table section")
+			return InvalidTableIndexError(elem.Index)
 		}
 
 		val, err := m.execInitExpr(elem.Offset)
@@ -73,32 +97,19 @@ func (m *Module) populateTables() error {
 		}
 		offset, ok := val.(int32)
 		if !ok {
-			return errors.New("The offset initializer expression does not return i32")
+			return InvalidValueTypeInitExprError{reflect.Int32, reflect.TypeOf(offset).Kind()}
 		}
 
 		table := m.TableIndexSpace[int(elem.Index)]
-		switch {
-		case int(offset) > len(table):
-			// make space for offset - 1 elements, so the n'th element
-			// of this segment is located at offset + n
-			table = append(table, make([]uint32, offset-1)...)
-			fallthrough
-		case int(offset) == len(table):
-			table = append(table, elem.Elems...)
-		case int(offset) < len(table):
-			lastIndex := int(offset) + len(elem.Elems) - 1
-			if lastIndex >= len(table) {
-				table = append(table, make([]uint32, lastIndex+1-len(table))...)
-			}
-
-			tableIndex := offset
-			for _, funcIndex := range elem.Elems {
-				table[tableIndex] = funcIndex
-				tableIndex++
-			}
+		if int(offset)+len(elem.Elems) > len(table) {
+			data := make([]uint32, int(offset)+len(elem.Elems))
+			copy(data[offset:], elem.Elems)
+			copy(data, table)
+			m.TableIndexSpace[int(elem.Index)] = data
+		} else {
+			copy(table[int(offset):], elem.Elems)
+			m.TableIndexSpace[int(elem.Index)] = table
 		}
-
-		m.TableIndexSpace[int(elem.Index)] = table
 	}
 
 	logger.Printf("There are %d entries in the table index space.", len(m.TableIndexSpace))
@@ -109,7 +120,7 @@ func (m *Module) populateTables() error {
 // by the integer index. It returns an error if index is invalid.
 func (m *Module) GetTableElement(index int) (uint32, error) {
 	if index >= len(m.TableIndexSpace[0]) {
-		return 0, errors.New("Invalid index into the table index space")
+		return 0, InvalidTableIndexError(index)
 	}
 
 	return m.TableIndexSpace[0][index], nil
@@ -123,7 +134,7 @@ func (m *Module) populateLinearMemory() error {
 
 	for _, entry := range m.Data.Entries {
 		if entry.Index != 0 {
-			return errors.New("Invalid index for linear memory")
+			return InvalidLinearMemoryIndexError(entry.Index)
 		}
 
 		val, err := m.execInitExpr(entry.Offset)
@@ -132,30 +143,19 @@ func (m *Module) populateLinearMemory() error {
 		}
 		offset, ok := val.(int32)
 		if !ok {
-			return errors.New("The offset initializer expression does not return i32")
+			return InvalidValueTypeInitExprError{reflect.Int32, reflect.TypeOf(offset).Kind()}
 		}
+
 		memory := m.LinearMemoryIndexSpace[int(entry.Index)]
-
-		switch {
-		case int(offset) > len(memory):
-			memory = append(memory, make([]byte, offset-1)...)
-			fallthrough
-		case int(offset) == len(memory):
-			memory = append(memory, entry.Data...)
-		case int(offset) < len(memory):
-			lastIndex := int(offset) + len(entry.Data) - 1
-			if lastIndex >= len(memory) {
-				memory = append(memory, make([]byte, lastIndex+1-len(memory))...)
-			}
-
-			memIndex := offset
-			for _, byte := range entry.Data {
-				memory[memIndex] = byte
-				memIndex++
-			}
+		if int(offset)+len(entry.Data) > len(memory) {
+			data := make([]byte, int(offset)+len(entry.Data))
+			copy(data[offset:], entry.Data)
+			copy(data, memory)
+			m.LinearMemoryIndexSpace[int(entry.Index)] = data
+		} else {
+			copy(memory[int(offset):], entry.Data)
+			m.LinearMemoryIndexSpace[int(entry.Index)] = memory
 		}
-
-		m.LinearMemoryIndexSpace[int(entry.Index)] = memory
 	}
 
 	return nil
@@ -163,7 +163,7 @@ func (m *Module) populateLinearMemory() error {
 
 func (m *Module) GetLinearMemoryData(index int) (byte, error) {
 	if index >= len(m.LinearMemoryIndexSpace[0]) {
-		return 0, errors.New("Invalid index to linear memory index space")
+		return 0, InvalidLinearMemoryIndexError(uint32(index))
 
 	}
 
