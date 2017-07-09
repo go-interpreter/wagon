@@ -18,6 +18,6 @@ var (
 	End         = newOp(0x0b, "end", nil, noReturn)
 	Br          = newPolymorphicOp(0x0c, "br")
 	BrIf        = newOp(0x0d, "br_if", []wasm.ValueType{wasm.ValueTypeI32}, noReturn)
-	BrTable     = newOp(0x0e, "br_table", []wasm.ValueType{wasm.ValueTypeI32}, noReturn)
+	BrTable     = newPolymorphicOp(0x0e, "br_table")
 	Return      = newPolymorphicOp(0x0f, "return")
 )
