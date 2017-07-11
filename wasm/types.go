@@ -85,14 +85,6 @@ type FunctionSig struct {
 	// The parameter types of the function
 	ParamTypes  []ValueType
 	ReturnTypes []ValueType
-
-	body *FunctionBody
-}
-
-// Body returns the corresponding function body of the FunctionSig object, if
-// any.
-func (f FunctionSig) Body() *FunctionBody {
-	return f.body
 }
 
 func (f FunctionSig) String() string {

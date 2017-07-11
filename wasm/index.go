@@ -38,12 +38,17 @@ func (m *Module) populateFunctions() error {
 		return nil
 	}
 
-	for _, index := range m.Function.Types {
-		if int(index) >= len(m.Types.Entries) {
-			return InvalidFunctionIndexError(index)
+	for codeIndex, typeIndex := range m.Function.Types {
+		if int(typeIndex) >= len(m.Types.Entries) {
+			return InvalidFunctionIndexError(typeIndex)
 		}
 
-		m.FunctionIndexSpace = append(m.FunctionIndexSpace, m.Types.Entries[int(index)])
+		fn := Function{
+			Sig:  &m.Types.Entries[typeIndex],
+			Body: &m.Code.Bodies[codeIndex],
+		}
+
+		m.FunctionIndexSpace = append(m.FunctionIndexSpace, fn)
 	}
 
 	return nil
@@ -51,7 +56,7 @@ func (m *Module) populateFunctions() error {
 
 // GetFunction returns a *Function, based on the function's index in
 // the function index space. Returns nil when the index is invalid
-func (m *Module) GetFunction(i int) *FunctionSig {
+func (m *Module) GetFunction(i int) *Function {
 	if i >= len(m.FunctionIndexSpace) || i < 0 {
 		return nil
 	}

@@ -19,6 +19,12 @@ const (
 	Version uint32 = 0x1
 )
 
+// Function represents an entry in the function index space of a module.
+type Function struct {
+	Sig  *FunctionSig
+	Body *FunctionBody
+}
+
 // Module represents a parsed WebAssembly module:
 // http://webassembly.org/docs/modules/
 type Module struct {
@@ -37,7 +43,7 @@ type Module struct {
 	Data     *SectionData
 
 	// The function index space of the module
-	FunctionIndexSpace []FunctionSig
+	FunctionIndexSpace []Function
 	GlobalIndexSpace   []GlobalEntry
 	// function indices into the global function space
 	// the limit of each table is its capacity (cap)
