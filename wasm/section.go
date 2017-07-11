@@ -611,14 +611,6 @@ func (m *Module) readSectionCode(r io.Reader) error {
 		return MissingSectionError(SectionIDType)
 	}
 
-	for _, index := range m.Function.Types {
-		if int(index) >= len(m.Types.Entries) {
-			return InvalidFunctionIndexError(index)
-		}
-
-		m.Types.Entries[index].body = &s.Bodies[index]
-	}
-
 	return nil
 }
 
