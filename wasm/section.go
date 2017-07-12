@@ -72,6 +72,12 @@ func (e InvalidSectionIDError) Error() string {
 	return fmt.Sprintf("wasm: invalid section ID %d", e)
 }
 
+type InvalidCodeIndexError int
+
+func (e InvalidCodeIndexError) Error() string {
+	return fmt.Sprintf("wasm: invalid index to code section: %d", int(e))
+}
+
 var ErrUnsupportedSection = errors.New("wasm: unsupported section")
 
 type MissingSectionError SectionID
