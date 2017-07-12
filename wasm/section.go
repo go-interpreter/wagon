@@ -617,11 +617,9 @@ func (m *Module) readSectionCode(r io.Reader) error {
 var ErrFunctionNoEnd = errors.New("Function body does not end with 0x0b (end)")
 
 type FunctionBody struct {
-	Module         *Module // The parent module containing this function body, for execution purposes
-	Locals         []LocalEntry
-	Code           []byte
-	MaxDepth       int // the maximum stack depth that can be reached while executing this body
-	TotalLocalVars int // the total number of local variables used by this body
+	Module *Module // The parent module containing this function body, for execution purposes
+	Locals []LocalEntry
+	Code   []byte
 }
 
 func readFunctionBody(r io.Reader) (FunctionBody, error) {
