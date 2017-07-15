@@ -43,20 +43,12 @@ func readInitExpr(r io.Reader) ([]byte, error) {
 	buf := new(bytes.Buffer)
 	r = io.TeeReader(r, buf)
 
-	// For reading an initializer expression, we parse bytes
-	// as if reading WASM code, but convert LEB128 encoded
-	// integers into their normal little endian representation
-	// One reason why we do not execute it on the fly is that
-	// get_global uses indices to the global index space, which
-	// might have not been populated when a function reading a module
-	// section is calling this.
 outer:
 	for {
 		_, err := io.ReadFull(r, b)
 		if err != nil {
 			return nil, err
 		}
-
 		switch b[0] {
 		case i32Const:
 			_, err := leb128.ReadVarint32(r)
@@ -69,7 +61,7 @@ outer:
 				return nil, err
 			}
 		case f32Const:
-			var i uint64
+			var i uint32
 			if err := binary.Read(r, binary.LittleEndian, &i); err != nil {
 				return nil, err
 			}
@@ -133,11 +125,11 @@ func (m *Module) ExecInitExpr(expr []byte) (interface{}, error) {
 			stack = append(stack, uint64(i))
 			lastVal = ValueTypeI64
 		case f32Const:
-			var i uint64
+			var i uint32
 			if err := binary.Read(r, binary.LittleEndian, &i); err != nil {
 				return nil, err
 			}
-			stack = append(stack, i)
+			stack = append(stack, uint64(i))
 			lastVal = ValueTypeF32
 		case f64Const:
 			var i uint64
