@@ -155,6 +155,10 @@ func (m *Module) ExecInitExpr(expr []byte) (interface{}, error) {
 		}
 	}
 
+	if len(stack) == 0 {
+		return nil, nil
+	}
+
 	v := stack[len(stack)-1]
 	switch lastVal {
 	case ValueTypeI32:
