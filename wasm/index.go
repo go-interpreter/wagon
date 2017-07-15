@@ -96,7 +96,7 @@ func (m *Module) populateTables() error {
 			return InvalidTableIndexError(elem.Index)
 		}
 
-		val, err := m.execInitExpr(elem.Offset)
+		val, err := m.ExecInitExpr(elem.Offset)
 		if err != nil {
 			return err
 		}
@@ -142,7 +142,7 @@ func (m *Module) populateLinearMemory() error {
 			return InvalidLinearMemoryIndexError(entry.Index)
 		}
 
-		val, err := m.execInitExpr(entry.Offset)
+		val, err := m.ExecInitExpr(entry.Offset)
 		if err != nil {
 			return err
 		}

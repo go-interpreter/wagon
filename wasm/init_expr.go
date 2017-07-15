@@ -97,10 +97,11 @@ outer:
 	return buf.Bytes(), nil
 }
 
-// execInitExpr executes an init_expr and returns a numeral value which can
-// either be int32, int64, float32 or float64.
-// It returns an error if the initializer expression is inavlid.
-func (m *Module) execInitExpr(expr []byte) (interface{}, error) {
+// ExecInitExpr executes an initializer expression and returns an interface{} value
+// which can either be int32, int64, float32 or float64.
+// It returns an error if the expression is invalid, and nil when the expression
+// yields no value.
+func (m *Module) ExecInitExpr(expr []byte) (interface{}, error) {
 	var stack []uint64
 	var lastVal ValueType
 	r := bytes.NewReader(expr)
