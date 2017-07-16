@@ -57,7 +57,6 @@ outer:
 			return nil, err
 		}
 
-		buf.WriteByte(b[0])
 		switch b[0] {
 		case i32Const:
 			_, err := leb128.ReadVarint32(r)
