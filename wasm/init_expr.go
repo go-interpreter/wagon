@@ -29,13 +29,13 @@ var ErrEmptyInitExpr = errors.New("wasm: Initializer expression produces no valu
 type InvalidInitExprOpError byte
 
 func (e InvalidInitExprOpError) Error() string {
-	return fmt.Sprintf("wasm: Invalid opcode in initializer expression: %#x", e)
+	return fmt.Sprintf("wasm: Invalid opcode in initializer expression: %#x", byte(e))
 }
 
 type InvalidGlobalIndexError uint32
 
 func (e InvalidGlobalIndexError) Error() string {
-	return fmt.Sprintf("wasm: Invalid index to global index space: %#x", e)
+	return fmt.Sprintf("wasm: Invalid index to global index space: %#x", uint32(e))
 }
 
 func readInitExpr(r io.Reader) ([]byte, error) {
