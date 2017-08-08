@@ -5,6 +5,7 @@
 package wasm
 
 import (
+	"encoding/binary"
 	"io"
 )
 
@@ -24,4 +25,22 @@ func readString(r io.Reader, n int) (string, error) {
 		return "", err
 	}
 	return string(bytes), nil
+}
+
+func readU32(r io.Reader) (uint32, error) {
+	var buf [4]byte
+	_, err := io.ReadFull(r, buf[:])
+	if err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint32(buf[:]), nil
+}
+
+func readU64(r io.Reader) (uint64, error) {
+	var buf [4]byte
+	_, err := io.ReadFull(r, buf[:])
+	if err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint64(buf[:]), nil
 }

@@ -5,7 +5,6 @@
 package wasm
 
 import (
-	"encoding/binary"
 	"errors"
 	"io"
 
@@ -67,15 +66,14 @@ func ReadModule(r io.Reader, resolvePath ResolveFunc) (*Module, error) {
 		CurPos: 0,
 	}
 	m := &Module{}
-	var magic uint32
-
-	if err := binary.Read(reader, binary.LittleEndian, &magic); err != nil {
+	magic, err := readU32(reader)
+	if err != nil {
 		return nil, err
 	}
 	if magic != Magic {
 		return nil, ErrInvalidMagic
 	}
-	if err := binary.Read(reader, binary.LittleEndian, &m.Version); err != nil {
+	if m.Version, err = readU32(reader); err != nil {
 		return nil, err
 	}
 

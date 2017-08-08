@@ -7,6 +7,7 @@ package validate
 import (
 	"bytes"
 	"encoding/binary"
+	"io"
 
 	"github.com/go-interpreter/wagon/wasm"
 	"github.com/go-interpreter/wagon/wasm/leb128"
@@ -47,17 +48,22 @@ func (vm *mockVM) fetchVarInt64() (int64, error) {
 	return leb128.ReadVarint64(vm.code)
 }
 
-// TODO (vibhavp): As binary.Read uses reflect, switch
-// to binary.LittleEndian.Uint(32/64) in the future.
-
-func (vm *mockVM) fetchUint32() (i uint32, err error) {
-	err = binary.Read(vm.code, binary.LittleEndian, &i)
-	return
+func (vm *mockVM) fetchUint32() (uint32, error) {
+	var buf [4]byte
+	_, err := io.ReadFull(vm.code, buf[:])
+	if err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint32(buf[:]), nil
 }
 
-func (vm *mockVM) fetchUint64() (i uint64, err error) {
-	err = binary.Read(vm.code, binary.LittleEndian, &i)
-	return
+func (vm *mockVM) fetchUint64() (uint64, error) {
+	var buf [8]byte
+	_, err := io.ReadFull(vm.code, buf[:])
+	if err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint64(buf[:]), nil
 }
 
 func (vm *mockVM) pushBlock(op byte, blockType wasm.BlockType) {

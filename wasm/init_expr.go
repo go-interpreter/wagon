@@ -6,7 +6,6 @@ package wasm
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -61,13 +60,11 @@ outer:
 				return nil, err
 			}
 		case f32Const:
-			var i uint32
-			if err := binary.Read(r, binary.LittleEndian, &i); err != nil {
+			if _, err := readU32(r); err != nil {
 				return nil, err
 			}
 		case f64Const:
-			var i uint64
-			if err := binary.Read(r, binary.LittleEndian, &i); err != nil {
+			if _, err := readU64(r); err != nil {
 				return nil, err
 			}
 		case getGlobal:
@@ -125,15 +122,15 @@ func (m *Module) ExecInitExpr(expr []byte) (interface{}, error) {
 			stack = append(stack, uint64(i))
 			lastVal = ValueTypeI64
 		case f32Const:
-			var i uint32
-			if err := binary.Read(r, binary.LittleEndian, &i); err != nil {
+			i, err := readU32(r)
+			if err != nil {
 				return nil, err
 			}
 			stack = append(stack, uint64(i))
 			lastVal = ValueTypeF32
 		case f64Const:
-			var i uint64
-			if err := binary.Read(r, binary.LittleEndian, &i); err != nil {
+			i, err := readU64(r)
+			if err != nil {
 				return nil, err
 			}
 			stack = append(stack, i)
