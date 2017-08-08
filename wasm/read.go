@@ -37,7 +37,7 @@ func readU32(r io.Reader) (uint32, error) {
 }
 
 func readU64(r io.Reader) (uint64, error) {
-	var buf [4]byte
+	var buf [8]byte
 	_, err := io.ReadFull(r, buf[:])
 	if err != nil {
 		return 0, err
