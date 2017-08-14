@@ -5,17 +5,39 @@
 package wagon
 
 import (
+	"bufio"
 	"bytes"
 	"os/exec"
 	"testing"
 )
 
 func TestGovet(t *testing.T) {
-	cmd := exec.Command("go", "vet", "./...")
 	buf := new(bytes.Buffer)
+	cmd := exec.Command("go", "list", "./...")
 	cmd.Stdout = buf
 	cmd.Stderr = buf
 	err := cmd.Run()
+	if err != nil {
+		t.Fatalf("error getting package list: %v\n%s", err, string(buf.Bytes()))
+	}
+	var pkgs []string
+	s := bufio.NewScanner(buf)
+	for s.Scan() {
+		pkg := s.Text()
+		if pkg == "github.com/go-interpreter/wagon/exec/internal/bits" {
+			continue
+		}
+		pkgs = append(pkgs, pkg)
+	}
+	if err = s.Err(); err != nil {
+		t.Fatalf("error parsing package list: %v", err)
+	}
+
+	cmd = exec.Command("go", append([]string{"vet"}, pkgs...)...)
+	buf = new(bytes.Buffer)
+	cmd.Stdout = buf
+	cmd.Stderr = buf
+	err = cmd.Run()
 	if err != nil {
 		t.Fatalf("error running %s:\n%s\n%v", "go vet", string(buf.Bytes()), err)
 	}
