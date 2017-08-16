@@ -34,8 +34,8 @@ type Instr struct {
 
 // StackInfo stores details about a new stack ended by an instruction.
 type StackInfo struct {
-	MaxDepth    int64 // The maximum depth reached
-	PreserveTop bool  // Whether the value on the top of the stack should be preserved while unwinding
+	StackTopDiff int64 // The difference between the stack depths at the end of the block
+	PreserveTop  bool  // Whether the value on the top of the stack should be preserved while unwinding
 }
 
 // BlockInfo stores details about a block created or ended by an instruction.
@@ -147,8 +147,8 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 					return nil, ErrStackUnderflow
 				}
 				instr.NewStack = &StackInfo{
-					MaxDepth:    int64(elemsDiscard),
-					PreserveTop: blockSig != wasm.BlockTypeEmpty,
+					StackTopDiff: int64(elemsDiscard),
+					PreserveTop:  blockSig != wasm.BlockTypeEmpty,
 				}
 			} else {
 				instr.NewStack = &StackInfo{}
@@ -190,8 +190,8 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 			// have the same code
 			index := blockIndices.Get(int(depth))
 			instr.NewStack = &StackInfo{
-				MaxDepth:    elemsDiscard,
-				PreserveTop: disas.Code[index].Block.Signature != wasm.BlockTypeEmpty,
+				StackTopDiff: elemsDiscard,
+				PreserveTop:  disas.Code[index].Block.Signature != wasm.BlockTypeEmpty,
 			}
 
 		case ops.BrTable:
