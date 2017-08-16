@@ -99,16 +99,16 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 		logger.Printf("Name is %s", opStr.Name)
 		if !opStr.Polymorphic {
 			top := int(stackDepths.Top())
-			stackDepths.SetTop(uint64(top - len(opStr.Args)))
+			top -= len(opStr.Args)
+			stackDepths.SetTop(uint64(top))
 			if top < -1 {
 				return nil, ErrStackUnderflow
 			}
 			if opStr.Returns != wasm.ValueType(wasm.BlockTypeEmpty) {
-				stackDepths.SetTop(uint64(top) + 1)
+				top++
+				stackDepths.SetTop(uint64(top))
 			}
-			if top > disas.MaxDepth {
-				disas.MaxDepth = top
-			}
+			disas.checkMaxDepth(top)
 		}
 
 		switch op {
@@ -243,10 +243,12 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 			top := stackDepths.Top()
 			switch op {
 			case ops.GetLocal, ops.GetGlobal:
-				stackDepths.SetTop(top + 1)
-				disas.checkMaxDepth(int(stackDepths.Top()))
+				top++
+				stackDepths.SetTop(top)
+				disas.checkMaxDepth(int(top))
 			case ops.SetLocal, ops.SetGlobal:
-				stackDepths.SetTop(top - 1)
+				top--
+				stackDepths.SetTop(top)
 			case ops.TeeLocal:
 				// stack remains unchanged for tee_local
 			}
@@ -303,10 +305,12 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 			curDepth := stackDepths.Top()
 			switch op {
 			case ops.CurrentMemory:
-				stackDepths.SetTop(curDepth + 1)
-				disas.checkMaxDepth(int(stackDepths.Top()))
+				top := curDepth + 1
+				stackDepths.SetTop(top)
+				disas.checkMaxDepth(int(top))
 			case ops.GrowMemory:
-				stackDepths.SetTop(curDepth - 1)
+				top := curDepth - 1
+				stackDepths.SetTop(top)
 			}
 		}
 
