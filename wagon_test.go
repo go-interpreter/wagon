@@ -24,7 +24,7 @@ func TestGovet(t *testing.T) {
 	s := bufio.NewScanner(buf)
 	for s.Scan() {
 		pkg := s.Text()
-		if pkg == "github.com/go-interpreter/wagon/exec/internal/bits" {
+		if pkg == "github.com/go-interpreter/wagon/vendor/math/bits" {
 			continue
 		}
 		pkgs = append(pkgs, pkg)
