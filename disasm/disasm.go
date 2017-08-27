@@ -181,14 +181,12 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 			instr.Immediates = append(instr.Immediates, depth)
 
 			curDepth := stackDepths.Top()
-			elemsDiscard := int64(int(curDepth) - int(stackDepths.Get(int(depth))))
+			elemsDiscard := int64(int(curDepth) - int(stackDepths.Get(stackDepths.Len()-1-int(depth))))
 			if elemsDiscard < 0 {
 				return nil, ErrStackUnderflow
 			}
 
-			// we use getBlockDepth because a getBlockIndex would
-			// have the same code
-			index := blockIndices.Get(int(depth))
+			index := blockIndices.Get(blockIndices.Len() - 1 - int(depth))
 			instr.NewStack = &StackInfo{
 				StackTopDiff: elemsDiscard,
 				PreserveTop:  disas.Code[index].Block.Signature != wasm.BlockTypeEmpty,
