@@ -111,8 +111,10 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 				}
 				vm.stackTop = block.stackTop
 				vm.pushOperand(wasm.ValueType(block.blockType))
+				vm.stackTop = block.stackTop + 1 // as we pushed an element
+			} else {
+				vm.stackTop = block.stackTop
 			}
-			vm.stackTop = block.stackTop
 
 		case ops.BrIf, ops.Br:
 			depth, err := vm.fetchVarUint()
