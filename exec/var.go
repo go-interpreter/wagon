@@ -16,7 +16,7 @@ func (vm *VM) setLocal() {
 
 func (vm *VM) teeLocal() {
 	index := vm.fetchUint32()
-	val := vm.popUint64()
+	val := vm.ctx.stack[len(vm.ctx.stack)-1]
 	vm.ctx.locals[int(index)] = val
 }
 
