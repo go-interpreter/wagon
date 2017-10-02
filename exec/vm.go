@@ -242,11 +242,12 @@ func (vm *VM) ExecCode(fnIndex int64, args ...uint64) (interface{}, error) {
 	}
 	compiled := vm.compiledFuncs[fnIndex]
 	if len(vm.ctx.stack) < compiled.maxDepth {
-		vm.ctx.stack = make([]uint64, compiled.maxDepth)
+		vm.ctx.stack = make([]uint64, 0, compiled.maxDepth)
 	}
 	vm.ctx.locals = make([]uint64, compiled.totalLocalVars)
 	vm.ctx.pc = 0
 	vm.ctx.code = compiled.code
+	vm.ctx.curFunc = fnIndex
 
 	for i, arg := range args {
 		vm.ctx.locals[i] = arg
@@ -307,15 +308,18 @@ outer:
 				continue
 			}
 		case ops.BrTable:
-			// println("brtable")
 			index := vm.fetchInt64()
 			label := vm.popInt32()
 			table := vm.compiledFuncs[vm.ctx.curFunc].branchTables[index]
 			var target compile.Target
-			if label < int32(len(table.Targets)) {
+			if label >= 0 && label < int32(len(table.Targets)) {
 				target = table.Targets[int32(label)]
 			} else {
 				target = table.DefaultTarget
+			}
+
+			if target.Return {
+				break outer
 			}
 			vm.ctx.pc = target.Addr
 			var top uint64
