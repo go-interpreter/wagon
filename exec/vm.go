@@ -107,6 +107,23 @@ func NewVM(module *wasm.Module) (*VM, error) {
 		}
 	}
 
+	for i, global := range module.GlobalIndexSpace {
+		val, err := module.ExecInitExpr(global.Init)
+		if err != nil {
+			return nil, err
+		}
+		switch v := val.(type) {
+		case int32:
+			vm.globals[i] = uint64(v)
+		case int64:
+			vm.globals[i] = uint64(v)
+		case float32:
+			vm.globals[i] = uint64(math.Float32bits(v))
+		case float64:
+			vm.globals[i] = uint64(math.Float64bits(v))
+		}
+	}
+
 	if module.Start != nil {
 		_, err := vm.ExecCode(int64(module.Start.Index))
 		if err != nil {
