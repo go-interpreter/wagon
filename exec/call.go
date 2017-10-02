@@ -40,6 +40,10 @@ var (
 	// a signature mismatch between the table entry and the type entry is found
 	// in a call_indirect operation.
 	ErrSignatureMismatch = errors.New("exec: signature mismatch in call_indirect")
+	// ErrUndefinedElementIndex is the error value used while trapping the VM when
+	// an invalid index to the module's table space is used as an operand to
+	// call_indirect
+	ErrUndefinedElementIndex = errors.New("exec: undefined element index")
 )
 
 func (vm *VM) call() {
@@ -52,6 +56,9 @@ func (vm *VM) callIndirect() {
 	fnExpect := vm.module.Types.Entries[index]
 	_ = vm.fetchUint32() // reserved (https://github.com/WebAssembly/design/blob/27ac254c854994103c24834a994be16f74f54186/BinaryEncoding.md#call-operators-described-here)
 	tableIndex := vm.popUint32()
+	if int(tableIndex) >= len(vm.module.TableIndexSpace[0]) {
+		panic(ErrUndefinedElementIndex)
+	}
 	elemIndex := vm.module.TableIndexSpace[0][tableIndex]
 	fnActual := vm.module.FunctionIndexSpace[elemIndex]
 
