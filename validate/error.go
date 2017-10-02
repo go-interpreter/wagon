@@ -19,7 +19,7 @@ type Error struct {
 }
 
 func (e Error) Error() string {
-	return fmt.Sprintf("error while validating function %d at offset %d: %v", e.Offset, e.Function, e.Err)
+	return fmt.Sprintf("error while validating function %d at offset %d: %v", e.Function, e.Offset, e.Err)
 }
 
 var ErrStackUnderflow = errors.New("validate: stack underflow")
@@ -58,7 +58,7 @@ type InvalidTypeError struct {
 }
 
 func (e InvalidTypeError) Error() string {
-	return fmt.Sprintf("invalid type, got: %v, wanted: %v", e.Got, e.Got)
+	return fmt.Sprintf("invalid type, got: %v, wanted: %v", e.Got, e.Wanted)
 }
 
 type InvalidElementIndexError uint32
