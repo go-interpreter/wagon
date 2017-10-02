@@ -87,6 +87,7 @@ type Target struct {
 	Addr        int64 // The absolute address of the target
 	Discard     int64 // The number of elements to discard
 	PreserveTop bool  // Whether the top of the stack is to be preserved
+	Return      bool  // Whether to return in order to take this branch/target
 }
 
 // BranchTable is the structure pointed to by a rewritten br_table instruction.
@@ -111,10 +112,13 @@ type block struct {
 	offset int64
 
 	// Whether this block is created by an 'if' operator
-	// in that case, the byte offset to which the address of the
-	// else branch is written. This value (0) is overwritten with the correct address
-	// when the accompanying 'else' branch/operator is reached
-	ifBlock        bool
+	// in that case, the 'offset' field is set to the byte offset
+	// of the else branch, once the else operator is reached.
+	ifBlock bool
+	// if ... else ... end is compiled to
+	// jmpnz <else-addr> ... jmp <end-addr> ... <discard>
+	// elseAddrOffset is the byte offset of the else-addr address
+	// in the new/compiled byte buffer.
 	elseAddrOffset int64
 
 	// Whether this block is created by a 'loop' operator
@@ -136,7 +140,12 @@ func Compile(disassembly []disasm.Instr) ([]byte, []*BranchTable) {
 
 	curBlockDepth := -1
 	blocks := make(map[int]*block) // maps nesting depths (labels) to blocks
+
+	blocks[-1] = &block{}
 	for _, instr := range disassembly {
+		if instr.Unreachable {
+			continue
+		}
 		switch instr.Op.Code {
 		case ops.I32Load, ops.I64Load, ops.F32Load, ops.F64Load, ops.I32Load8s, ops.I32Load8u, ops.I32Load16s, ops.I32Load16u, ops.I64Load8s, ops.I64Load8u, ops.I64Load16s, ops.I64Load16u, ops.I64Load32s, ops.I64Load32u, ops.I32Store, ops.I64Store, ops.F32Store, ops.F64Store, ops.I32Store8, ops.I32Store16, ops.I64Store8, ops.I64Store16, ops.I64Store32:
 			// memory_immediate has two fields, the alignment and the offset.
@@ -151,7 +160,7 @@ func Compile(disassembly []disasm.Instr) ([]byte, []*BranchTable) {
 				elseAddrOffset: int64(buffer.Len()),
 			}
 			// the address to jump to if the condition for `if` is false
-			// (i.e the value on the top of the stack is 0)
+			// (i.e when the value on the top of the stack is 0)
 			binary.Write(buffer, binary.LittleEndian, int64(0))
 			continue
 		case ops.Loop:
@@ -161,16 +170,26 @@ func Compile(disassembly []disasm.Instr) ([]byte, []*BranchTable) {
 				offset:    int64(buffer.Len()),
 				ifBlock:   false,
 				loopBlock: true,
+				discard:   *instr.NewStack,
 			}
 			continue
 		case ops.Block:
 			curBlockDepth++
 			blocks[curBlockDepth] = &block{
 				ifBlock: false,
+				discard: *instr.NewStack,
 			}
 			continue
 		case ops.Else:
 			// add code for jumping out of a taken if branch
+			if instr.NewStack != nil && instr.NewStack.StackTopDiff != 0 {
+				if instr.NewStack.PreserveTop {
+					buffer.WriteByte(OpDiscardPreserveTop)
+				} else {
+					buffer.WriteByte(OpDiscard)
+				}
+				binary.Write(buffer, binary.LittleEndian, instr.NewStack.StackTopDiff)
+			}
 			buffer.WriteByte(OpJmp)
 			ifBlockEndOffset := int64(buffer.Len())
 			binary.Write(buffer, binary.LittleEndian, int64(0))
@@ -223,7 +242,7 @@ func Compile(disassembly []disasm.Instr) ([]byte, []*BranchTable) {
 			curBlockDepth--
 			continue
 		case ops.Br:
-			if instr.NewStack.StackTopDiff != 0 {
+			if instr.NewStack != nil && instr.NewStack.StackTopDiff != 0 {
 				if instr.NewStack.PreserveTop {
 					buffer.WriteByte(OpDiscardPreserveTop)
 				} else {
@@ -245,33 +264,42 @@ func Compile(disassembly []disasm.Instr) ([]byte, []*BranchTable) {
 			block.patchOffsets = append(block.patchOffsets, int64(buffer.Len()))
 			// write the jump address
 			binary.Write(buffer, binary.LittleEndian, int64(0))
+
+			var stackTopDiff int64
 			// write whether we need to preserve the top
-			if !instr.NewStack.PreserveTop || instr.NewStack.StackTopDiff == 0 {
+			if instr.NewStack == nil || !instr.NewStack.PreserveTop || instr.NewStack.StackTopDiff == 0 {
 				buffer.WriteByte(byte(0))
 			} else {
+				stackTopDiff = instr.NewStack.StackTopDiff
 				buffer.WriteByte(byte(1))
 			}
 			// write the number of elements on the stack we need to discard
-			binary.Write(buffer, binary.LittleEndian, instr.NewStack.StackTopDiff)
+			binary.Write(buffer, binary.LittleEndian, stackTopDiff)
 			continue
 		case ops.BrTable:
 			branchTable := &BranchTable{
-				blocksLen: len(blocks),
+				// we subtract one for the implicit block created by
+				// the function body
+				blocksLen: len(blocks) - 1,
 			}
 			targetCount := instr.Immediates[0].(uint32)
 			branchTable.Targets = make([]Target, targetCount)
 			for i := range branchTable.Targets {
+				// The first immediates is the number of targets, so we ignore that
 				label := int64(instr.Immediates[i+1].(uint32))
 				branchTable.Targets[i].Addr = label
-				block := blocks[curBlockDepth-int(label)]
-				branchTable.Targets[i].Discard = block.discard.StackTopDiff
-				branchTable.Targets[i].PreserveTop = block.discard.PreserveTop
+				branch := instr.Branches[i]
+
+				branchTable.Targets[i].Return = branch.IsReturn
+				branchTable.Targets[i].Discard = branch.StackTopDiff
+				branchTable.Targets[i].PreserveTop = branch.PreserveTop
 			}
 			defaultLabel := int64(instr.Immediates[len(instr.Immediates)-1].(uint32))
 			branchTable.DefaultTarget.Addr = defaultLabel
-			defaultBlock := blocks[curBlockDepth-int(defaultLabel)]
-			branchTable.DefaultTarget.Discard = defaultBlock.discard.StackTopDiff
-			branchTable.DefaultTarget.PreserveTop = defaultBlock.discard.PreserveTop
+			defaultBranch := instr.Branches[targetCount]
+			branchTable.DefaultTarget.Return = defaultBranch.IsReturn
+			branchTable.DefaultTarget.Discard = defaultBranch.StackTopDiff
+			branchTable.DefaultTarget.PreserveTop = defaultBranch.PreserveTop
 			branchTables = append(branchTables, branchTable)
 			for _, block := range blocks {
 				block.branchTables = append(block.branchTables, branchTable)
@@ -288,6 +316,17 @@ func Compile(disassembly []disasm.Instr) ([]byte, []*BranchTable) {
 				panic(err)
 			}
 		}
+	}
+
+	// writing nop as the last instructions allows us to branch out of the
+	// function (ie, return)
+	addr := buffer.Len()
+	buffer.WriteByte(ops.Nop)
+
+	// patch all references to the "root" block of the function body
+	for _, offset := range blocks[-1].patchOffsets {
+		code := buffer.Bytes()
+		buffer = patchOffset(code, offset, int64(addr))
 	}
 
 	for _, table := range branchTables {

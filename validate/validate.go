@@ -7,7 +7,6 @@ package validate
 
 import (
 	"bytes"
-	"errors"
 	"io"
 
 	"github.com/go-interpreter/wagon/wasm"
@@ -23,7 +22,9 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 		code:       bytes.NewReader(body.Code),
 		origLength: len(body.Code),
 
-		blocks: []block{},
+		polymorphic: false,
+		blocks:      []block{},
+		curFunc:     fn,
 	}
 
 	localVariables := []operand{}
@@ -43,8 +44,6 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 		localVariables = append(localVariables, vars...)
 	}
 
-	lastOpReturn := false
-
 	for {
 		op, err := vm.code.ReadByte()
 		if err == io.EOF {
@@ -58,7 +57,7 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 			return vm, err
 		}
 
-		logger.Printf("PC: %d OP: %s", vm.pc(), opStruct.Name)
+		logger.Printf("PC: %d OP: %s polymorphic: %v", vm.pc(), opStruct.Name, vm.isPolymorphic())
 
 		if !opStruct.Polymorphic {
 			if err := vm.adjustStack(opStruct); err != nil {
@@ -77,7 +76,9 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 			case wasm.ValueTypeI32, wasm.ValueTypeI64, wasm.ValueTypeF32, wasm.ValueTypeF64, wasm.ValueType(wasm.BlockTypeEmpty):
 				vm.pushBlock(op, wasm.BlockType(sig))
 			default:
-				return vm, InvalidImmediateError{"block_type", opStruct.Name}
+				if !vm.isPolymorphic() {
+					return vm, InvalidImmediateError{"block_type", opStruct.Name}
+				}
 			}
 
 		case ops.Else:
@@ -87,27 +88,25 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 			}
 
 			if block.blockType != wasm.BlockTypeEmpty {
-				if !lastOpReturn {
-					top, under := vm.topOperand()
-					if under || (top.Type != wasm.ValueType(block.blockType)) {
-						return vm, InvalidTypeError{wasm.ValueType(block.blockType), top.Type}
-					}
+				top, under := vm.topOperand()
+				if !vm.isPolymorphic() && (under || top.Type != wasm.ValueType(block.blockType)) {
+					return vm, InvalidTypeError{wasm.ValueType(block.blockType), top.Type}
 				}
 				vm.pushOperand(wasm.ValueType(block.blockType))
 			}
 			vm.stackTop = block.stackTop
 		case ops.End:
+			isPolymorphic := vm.isPolymorphic()
+
 			block := vm.popBlock()
 			if block == nil {
 				return vm, UnmatchedOpError(op)
 			}
 
 			if block.blockType != wasm.BlockTypeEmpty {
-				if !lastOpReturn {
-					top, under := vm.topOperand()
-					if under || (!lastOpReturn && top.Type != wasm.ValueType(block.blockType)) {
-						return vm, InvalidTypeError{wasm.ValueType(block.blockType), top.Type}
-					}
+				top, under := vm.topOperand()
+				if !isPolymorphic && (under || top.Type != wasm.ValueType(block.blockType)) {
+					return vm, InvalidTypeError{wasm.ValueType(block.blockType), top.Type}
 				}
 				vm.stackTop = block.stackTop
 				vm.pushOperand(wasm.ValueType(block.blockType))
@@ -121,13 +120,15 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 			if err != nil {
 				return vm, err
 			}
-			if err = vm.canBranch(int(depth)); err != nil {
+			if err = vm.canBranch(int(depth)); !vm.isPolymorphic() && err != nil {
 				return vm, err
 			}
-
+			if op == ops.Br {
+				vm.setPolymorphic()
+			}
 		case ops.BrTable:
 			operand, under := vm.popOperand()
-			if under || operand.Type != wasm.ValueTypeI32 {
+			if !vm.isPolymorphic() && (under || operand.Type != wasm.ValueTypeI32) {
 				return vm, InvalidTypeError{wasm.ValueTypeI32, operand.Type}
 			}
 			// read table entries
@@ -142,7 +143,7 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 				if err != nil {
 					return vm, err
 				}
-				if err = vm.canBranch(int(entry)); err != nil {
+				if err = vm.canBranch(int(entry)); !vm.isPolymorphic() && err != nil {
 					return vm, err
 				}
 				targetTable = append(targetTable, entry)
@@ -152,9 +153,10 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 			if err != nil {
 				return vm, err
 			}
-			if err = vm.canBranch(int(defaultTarget)); err != nil {
+			if err = vm.canBranch(int(defaultTarget)); !vm.isPolymorphic() && err != nil {
 				return vm, err
 			}
+			vm.setPolymorphic()
 
 		case ops.Return:
 			if len(fn.ReturnTypes) > 1 {
@@ -163,11 +165,14 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 			if len(fn.ReturnTypes) != 0 {
 				// only single returns supported for now
 				top, under := vm.popOperand()
-				if under || top.Type != fn.ReturnTypes[0] {
+				if !vm.isPolymorphic() && (under || top.Type != fn.ReturnTypes[0]) {
 					return vm, InvalidTypeError{fn.ReturnTypes[0], top.Type}
 				}
 			}
-			lastOpReturn = true
+			vm.setPolymorphic()
+
+		case ops.Unreachable:
+			vm.setPolymorphic()
 
 		case ops.I32Const:
 			_, err := vm.fetchVarUint()
@@ -204,7 +209,7 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 				vm.pushOperand(v.Type)
 			} else { // == set_local or tee_local
 				top, under := vm.popOperand()
-				if under || top.Type != v.Type {
+				if !vm.isPolymorphic() && (under || top.Type != v.Type) {
 					return vm, InvalidTypeError{v.Type, top.Type}
 				}
 				if op == ops.TeeLocal {
@@ -226,7 +231,7 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 				vm.pushOperand(gv.Type.Type)
 			} else {
 				val, under := vm.popOperand()
-				if under || val.Type != gv.Type.Type {
+				if !vm.isPolymorphic() && (under || val.Type != gv.Type.Type) {
 					return vm, InvalidTypeError{gv.Type.Type, val.Type}
 				}
 			}
@@ -264,7 +269,7 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 			for index := range fn.Sig.ParamTypes {
 				argType := fn.Sig.ParamTypes[len(fn.Sig.ParamTypes)-index-1]
 				operand, under := vm.popOperand()
-				if under || operand.Type != argType {
+				if !vm.isPolymorphic() && (under || operand.Type != argType) {
 					return vm, InvalidTypeError{argType, operand.Type}
 				}
 			}
@@ -294,33 +299,33 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 				return vm, err
 			}
 
-			fnExpect := module.GetFunction(int(index))
-			if fnExpect == nil {
-				return vm, wasm.InvalidFunctionIndexError(index)
-			}
+			fnExpectSig := module.Types.Entries[index]
 
-			if operand, under := vm.popOperand(); under || operand.Type != wasm.ValueTypeI32 {
+			if operand, under := vm.popOperand(); !vm.isPolymorphic() && (under || operand.Type != wasm.ValueTypeI32) {
 				return vm, InvalidTypeError{wasm.ValueTypeI32, operand.Type}
 			}
 
-			for index := range fnExpect.Sig.ParamTypes {
-				argType := fnExpect.Sig.ParamTypes[len(fnExpect.Sig.ParamTypes)-index-1]
+			for index := range fnExpectSig.ParamTypes {
+				argType := fnExpectSig.ParamTypes[len(fnExpectSig.ParamTypes)-index-1]
 				operand, under := vm.popOperand()
-				if under || operand.Type != argType {
+				if !vm.isPolymorphic() && (under || (operand.Type != argType)) {
 					return vm, InvalidTypeError{argType, operand.Type}
 				}
 			}
 
-			if len(fnExpect.Sig.ReturnTypes) > 0 {
-				vm.pushOperand(fnExpect.Sig.ReturnTypes[0])
+			if len(fnExpectSig.ReturnTypes) > 0 {
+				vm.pushOperand(fnExpectSig.ReturnTypes[0])
 			}
 
 		case ops.Drop:
-			if _, under := vm.popOperand(); under {
-				return vm, errors.New("Stack underflow")
+			if _, under := vm.popOperand(); !vm.isPolymorphic() && under {
+				return vm, ErrStackUnderflow
 			}
 
 		case ops.Select:
+			if vm.isPolymorphic() {
+				continue
+			}
 			operands := make([]operand, 2)
 			c, under := vm.popOperand()
 			if under || c.Type != wasm.ValueTypeI32 {
@@ -329,7 +334,7 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 
 			for i := 0; i < 2; i++ {
 				operand, under := vm.popOperand()
-				if under {
+				if !vm.isPolymorphic() && under {
 					return vm, ErrStackUnderflow
 				}
 				operands[i] = operand
@@ -341,9 +346,6 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 			}
 
 			vm.pushOperand(operands[1].Type)
-		}
-		if op != ops.Return {
-			lastOpReturn = false
 		}
 	}
 

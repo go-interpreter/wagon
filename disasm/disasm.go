@@ -27,15 +27,25 @@ type Instr struct {
 	// Valid value types are:
 	// - (u)(int/float)(32/64)
 	// - wasm.BlockType
-	Immediates []interface{}
-	NewStack   *StackInfo // non-nil if the instruction requires the current stack to be unwound.
-	Block      *BlockInfo // non-nil if the instruction starts a new block.
+	Immediates  []interface{}
+	NewStack    *StackInfo // non-nil if the instruction creates or unwinds a stack.
+	Block       *BlockInfo // non-nil if the instruction starts or ends a new block.
+	Unreachable bool       // whether the operator can be reached during execution
+	// IsReturn is true if executing this instruction will result in the
+	// function returning. This is true for branches (br, br_if) to
+	// the depth <max_relative_depth> + 1, or the return operator itself.
+	// If true, NewStack for this instruction is nil.
+	IsReturn bool
+	// If the operator is br_table (ops.BrTable), this is a list of StackInfo
+	// fields for each of the blocks/branches referenced by the operator.
+	Branches []StackInfo
 }
 
-// StackInfo stores details about a new stack ended by an instruction.
+// StackInfo stores details about a new stack created or unwinded by an instruction.
 type StackInfo struct {
 	StackTopDiff int64 // The difference between the stack depths at the end of the block
 	PreserveTop  bool  // Whether the value on the top of the stack should be preserved while unwinding
+	IsReturn     bool  // Whether the unwind is equivalent to a return
 }
 
 // BlockInfo stores details about a block created or ended by an instruction.
@@ -60,6 +70,14 @@ func (d *Disassembly) checkMaxDepth(depth int) {
 	}
 }
 
+func pushPolymorphicOp(indexStack [][]int, index int) {
+	indexStack[len(indexStack)-1] = append(indexStack[len(indexStack)-1], index)
+}
+
+func isInstrReachable(indexStack [][]int) bool {
+	return len(indexStack[len(indexStack)-1]) == 0
+}
+
 var ErrStackUnderflow = errors.New("disasm: stack underflow")
 
 // Disassemble disassembles the given function. It also takes the function's
@@ -70,6 +88,10 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 	reader := bytes.NewReader(code)
 	disas := &Disassembly{}
 
+	// A stack of int arrays holding indices to instructions that make the stack
+	// polymorphic. Each block has its corresponding array. We start with one
+	// array for the root stack
+	blockPolymorphicOps := [][]int{[]int{}}
 	// a stack of current execution stack depth values, so that the depth for each
 	// stack is maintained indepepdently for calculating discard values
 	stackDepths := &stack.Stack{}
@@ -95,9 +117,24 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 			Op:         opStr,
 			Immediates: [](interface{}){},
 		}
+		if op == ops.End || op == ops.Else {
+			// There are two possible cases here:
+			// 1. The corresponding block/if/loop instruction
+			// *is* reachable, and an instruction somewhere in this
+			// block (and NOT in a nested block) makes the stack
+			// polymorphic. In this case, this end/else is reachable.
+			//
+			// 2. The corresponding block/if/loop instruction
+			// is *not* reachable, which makes this end/else unreachable
+			// too.
+			isUnreachable := blockIndices.Len() != len(blockPolymorphicOps)-1
+			instr.Unreachable = isUnreachable
+		} else {
+			instr.Unreachable = !isInstrReachable(blockPolymorphicOps)
+		}
 
-		logger.Printf("Name is %s", opStr.Name)
-		if !opStr.Polymorphic {
+		logger.Printf("op: %s, ureachable: %v", opStr.Name, instr.Unreachable)
+		if !opStr.Polymorphic && !instr.Unreachable {
 			top := int(stackDepths.Top())
 			top -= len(opStr.Args)
 			stackDepths.SetTop(uint64(top))
@@ -112,12 +149,21 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 		}
 
 		switch op {
+		case ops.Unreachable:
+			pushPolymorphicOp(blockPolymorphicOps, curIndex)
 		case ops.Drop:
-			stackDepths.SetTop(stackDepths.Top() - 1)
+			if !instr.Unreachable {
+				stackDepths.SetTop(stackDepths.Top() - 1)
+			}
 		case ops.Select:
-			stackDepths.SetTop(stackDepths.Top() - 3)
+			if !instr.Unreachable {
+				stackDepths.SetTop(stackDepths.Top() - 3)
+			}
 		case ops.Return:
-			stackDepths.SetTop(stackDepths.Top() - uint64(len(fn.Sig.ReturnTypes)))
+			if !instr.Unreachable {
+				stackDepths.SetTop(stackDepths.Top() - uint64(len(fn.Sig.ReturnTypes)))
+			}
+			pushPolymorphicOp(blockPolymorphicOps, curIndex)
 			lastOpReturn = true
 		case ops.End, ops.Else:
 			// The max depth reached while execing the current block
@@ -130,13 +176,18 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 				PairIndex: int(blockStartIndex),
 			}
 
+			disas.Code[blockStartIndex].Block.PairIndex = curIndex
+
 			// The max depth reached while execing the last block
 			// If the signature of the current block is not empty,
-			// this will be incremented
+			// this will be incremented.
+			// Same with ops.Br/BrIf, we subtract 2 instead of 1
+			// to get the depth of the *parent* block of the branch
+			// we want to take.
 			prevDepthIndex := stackDepths.Len() - 2
 			prevDepth := stackDepths.Get(prevDepthIndex)
 
-			if blockSig != wasm.BlockTypeEmpty {
+			if op != ops.Else && blockSig != wasm.BlockTypeEmpty && !instr.Unreachable {
 				stackDepths.Set(prevDepthIndex, prevDepth+1)
 				disas.checkMaxDepth(int(stackDepths.Get(prevDepthIndex)))
 			}
@@ -154,11 +205,20 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 				instr.NewStack = &StackInfo{}
 			}
 
+			disas.Code[blockStartIndex].NewStack = instr.NewStack
+			if !instr.Unreachable {
+				blockPolymorphicOps = blockPolymorphicOps[:len(blockPolymorphicOps)-1]
+			}
+
 			stackDepths.Pop()
 			if op == ops.Else {
 				stackDepths.Push(0)
 				blockIndices.Push(uint64(curIndex))
+				if !instr.Unreachable {
+					blockPolymorphicOps = append(blockPolymorphicOps, []int{})
+				}
 			}
+
 		case ops.Block, ops.Loop, ops.If:
 			sig, err := leb128.ReadVarint32(reader)
 			if err != nil {
@@ -166,6 +226,16 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 			}
 			logger.Printf("if, depth is %d", stackDepths.Top())
 			stackDepths.Push(stackDepths.Top())
+			// If this new block is unreachable, its
+			// entire instruction sequence is unreachable
+			// as well. To make sure that isInstrReachable
+			// returns the correct value, we don't push a new
+			// array to blockPolymorphicOps.
+			if !instr.Unreachable {
+				// Therefore, only push a new array if this instruction
+				// is reachable.
+				blockPolymorphicOps = append(blockPolymorphicOps, []int{})
+			}
 			instr.Block = &BlockInfo{
 				Start:     true,
 				Signature: wasm.BlockType(sig),
@@ -180,19 +250,38 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 			}
 			instr.Immediates = append(instr.Immediates, depth)
 
-			curDepth := stackDepths.Top()
-			elemsDiscard := int64(int(curDepth) - int(stackDepths.Get(stackDepths.Len()-1-int(depth))))
-			if elemsDiscard < 0 {
-				return nil, ErrStackUnderflow
-			}
+			if int(depth) == blockIndices.Len() {
+				instr.IsReturn = true
+			} else {
+				curDepth := stackDepths.Top()
+				// whenever we take a branch, the stack is unwound
+				// to the height of stack of its *parent* block, which
+				// is why we subtract 2 instead of 1.
+				// prevDepth holds the height of the stack when
+				// the block that we branch to started.
+				prevDepth := stackDepths.Get(stackDepths.Len() - 2 - int(depth))
+				elemsDiscard := int(curDepth) - int(prevDepth)
+				if elemsDiscard < 0 {
+					return nil, ErrStackUnderflow
+				}
 
-			index := blockIndices.Get(blockIndices.Len() - 1 - int(depth))
-			instr.NewStack = &StackInfo{
-				StackTopDiff: elemsDiscard,
-				PreserveTop:  disas.Code[index].Block.Signature != wasm.BlockTypeEmpty,
+				// No need to subtract 2 here, we are getting the block
+				// we need to branch to.
+				index := blockIndices.Get(blockIndices.Len() - 1 - int(depth))
+				instr.NewStack = &StackInfo{
+					StackTopDiff: int64(elemsDiscard),
+					PreserveTop:  disas.Code[index].Block.Signature != wasm.BlockTypeEmpty,
+				}
+			}
+			if op == ops.Br {
+				pushPolymorphicOp(blockPolymorphicOps, curIndex)
 			}
 
 		case ops.BrTable:
+			if !instr.Unreachable {
+				stackDepths.SetTop(stackDepths.Top() - 1)
+			}
+
 			targetCount, err := leb128.ReadVarUint32(reader)
 			if err != nil {
 				return nil, err
@@ -204,6 +293,24 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 					return nil, err
 				}
 				instr.Immediates = append(instr.Immediates, entry)
+
+				var info StackInfo
+				if int(entry) == blockIndices.Len() {
+					info.IsReturn = true
+				} else {
+					curDepth := stackDepths.Top()
+					branchDepth := stackDepths.Get(stackDepths.Len() - 2 - int(entry))
+					elemsDiscard := int(curDepth) - int(branchDepth)
+					logger.Printf("Curdepth %d branchDepth %d discard %d", curDepth, branchDepth, elemsDiscard)
+
+					if elemsDiscard < 0 {
+						return nil, ErrStackUnderflow
+					}
+					index := blockIndices.Get(blockIndices.Len() - 1 - int(entry))
+					info.StackTopDiff = int64(elemsDiscard)
+					info.PreserveTop = disas.Code[index].Block.Signature != wasm.BlockTypeEmpty
+				}
+				instr.Branches = append(instr.Branches, info)
 			}
 
 			defaultTarget, err := leb128.ReadVarUint32(reader)
@@ -211,7 +318,25 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 				return nil, err
 			}
 			instr.Immediates = append(instr.Immediates, defaultTarget)
-			stackDepths.SetTop(stackDepths.Top() - 1)
+
+			var info StackInfo
+			if int(defaultTarget) == blockIndices.Len() {
+				info.IsReturn = true
+			} else {
+
+				curDepth := stackDepths.Top()
+				branchDepth := stackDepths.Get(stackDepths.Len() - 2 - int(defaultTarget))
+				elemsDiscard := int(curDepth) - int(branchDepth)
+
+				if elemsDiscard < 0 {
+					return nil, ErrStackUnderflow
+				}
+				index := blockIndices.Get(blockIndices.Len() - 1 - int(defaultTarget))
+				info.StackTopDiff = int64(elemsDiscard)
+				info.PreserveTop = disas.Code[index].Block.Signature != wasm.BlockTypeEmpty
+			}
+			instr.Branches = append(instr.Branches, info)
+			pushPolymorphicOp(blockPolymorphicOps, curIndex)
 		case ops.Call, ops.CallIndirect:
 			index, err := leb128.ReadVarUint32(reader)
 			if err != nil {
@@ -225,12 +350,14 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 				}
 				instr.Immediates = append(instr.Immediates, reserved)
 			}
-			fn := module.GetFunction(int(index))
-			top := int(stackDepths.Top())
-			top -= len(fn.Sig.ParamTypes)
-			top += len(fn.Sig.ReturnTypes)
-			stackDepths.SetTop(uint64(top))
-			disas.checkMaxDepth(top)
+			if !instr.Unreachable {
+				fn := module.GetFunction(int(index))
+				top := int(stackDepths.Top())
+				top -= len(fn.Sig.ParamTypes)
+				top += len(fn.Sig.ReturnTypes)
+				stackDepths.SetTop(uint64(top))
+				disas.checkMaxDepth(top)
+			}
 		case ops.GetLocal, ops.SetLocal, ops.TeeLocal, ops.GetGlobal, ops.SetGlobal:
 			index, err := leb128.ReadVarUint32(reader)
 			if err != nil {
@@ -238,17 +365,19 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 			}
 			instr.Immediates = append(instr.Immediates, index)
 
-			top := stackDepths.Top()
-			switch op {
-			case ops.GetLocal, ops.GetGlobal:
-				top++
-				stackDepths.SetTop(top)
-				disas.checkMaxDepth(int(top))
-			case ops.SetLocal, ops.SetGlobal:
-				top--
-				stackDepths.SetTop(top)
-			case ops.TeeLocal:
-				// stack remains unchanged for tee_local
+			if !instr.Unreachable {
+				top := stackDepths.Top()
+				switch op {
+				case ops.GetLocal, ops.GetGlobal:
+					top++
+					stackDepths.SetTop(top)
+					disas.checkMaxDepth(int(top))
+				case ops.SetLocal, ops.SetGlobal:
+					top--
+					stackDepths.SetTop(top)
+				case ops.TeeLocal:
+					// stack remains unchanged for tee_local
+				}
 			}
 		case ops.I32Const:
 			i, err := leb128.ReadVarint32(reader)
@@ -298,18 +427,7 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 			if err != nil {
 				return nil, err
 			}
-			instr.Immediates = append(instr.Immediates, res)
-
-			curDepth := stackDepths.Top()
-			switch op {
-			case ops.CurrentMemory:
-				top := curDepth + 1
-				stackDepths.SetTop(top)
-				disas.checkMaxDepth(int(top))
-			case ops.GrowMemory:
-				top := curDepth - 1
-				stackDepths.SetTop(top)
-			}
+			instr.Immediates = append(instr.Immediates, uint8(res))
 		}
 
 		if op != ops.Return {

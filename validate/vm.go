@@ -23,17 +23,22 @@ type mockVM struct {
 
 	code *bytes.Reader
 
-	blocks []block // a stack of encountered blocks
+	polymorphic bool    // whether the base implict block has a polymorphic stack
+	blocks      []block // a stack of encountered blocks
+
+	curFunc *wasm.FunctionSig
 }
 
 // a block reprsents an instruction sequence preceeded by a control flow operator
 // it is used to verify that the block signature set by the operator is the correct
 // one when the block ends
 type block struct {
-	pc        int            // the pc where the control flow operator starting the block is located
-	stackTop  int            // stack top when the block started
-	blockType wasm.BlockType // block_type signature of the control operator
-	op        byte           // opcode for the operator starting the new block
+	pc          int            // the pc where the control flow operator starting the block is located
+	stackTop    int            // stack top when the block started
+	blockType   wasm.BlockType // block_type signature of the control operator
+	op          byte           // opcode for the operator starting the new block
+	polymorphic bool           // whether the block has a polymorphic stack
+	loop        bool           // whether the block is the body of a loop instruction
 }
 
 func (vm *mockVM) fetchVarUint() (uint32, error) {
@@ -69,10 +74,13 @@ func (vm *mockVM) fetchUint64() (uint64, error) {
 func (vm *mockVM) pushBlock(op byte, blockType wasm.BlockType) {
 	logger.Printf("Pushing block %v", blockType)
 	vm.blocks = append(vm.blocks, block{
-		pc:        vm.pc(),
-		stackTop:  vm.stackTop,
-		blockType: blockType,
-		op:        op})
+		pc:          vm.pc(),
+		stackTop:    vm.stackTop,
+		blockType:   blockType,
+		polymorphic: vm.isPolymorphic(),
+		op:          op,
+		loop:        op == ops.Loop,
+	})
 }
 
 // Get a block from it's relative nesting depth
@@ -85,16 +93,31 @@ func (vm *mockVM) getBlockFromDepth(depth int) *block {
 }
 
 // Returns nil if depth is a valid nesting depth value that can be
-// branched to
+// branched to.
 func (vm *mockVM) canBranch(depth int) error {
+	blockType := wasm.BlockTypeEmpty
+
 	block := vm.getBlockFromDepth(depth)
+	// jumping to the start of a loop block doesn't push a value
+	// on the stack.
 	if block == nil {
-		return InvalidLabelError(uint32(depth))
+		if depth == len(vm.blocks) {
+			//equivalent to a `return', as the function
+			//body is an "implicit" block
+			if len(vm.curFunc.ReturnTypes) != 0 {
+				blockType = wasm.BlockType(vm.curFunc.ReturnTypes[0])
+			}
+		} else {
+			return InvalidLabelError(uint32(depth))
+		}
+	} else if !block.loop {
+		blockType = block.blockType
 	}
-	if block.blockType != wasm.BlockTypeEmpty {
+
+	if blockType != wasm.BlockTypeEmpty {
 		top, under := vm.topOperand()
-		if under || top.Type != wasm.ValueType(block.blockType) {
-			return InvalidTypeError{wasm.ValueType(block.blockType), top.Type}
+		if under || top.Type != wasm.ValueType(blockType) {
+			return InvalidTypeError{wasm.ValueType(blockType), top.Type}
 		}
 	}
 
@@ -161,7 +184,7 @@ func (vm *mockVM) pushOperand(t wasm.ValueType) {
 func (vm *mockVM) adjustStack(op ops.Op) error {
 	for _, t := range op.Args {
 		op, under := vm.popOperand()
-		if under || op.Type != t {
+		if !vm.isPolymorphic() && (under || op.Type != t) {
 			return InvalidTypeError{t, op.Type}
 		}
 	}
@@ -171,6 +194,27 @@ func (vm *mockVM) adjustStack(op ops.Op) error {
 	}
 
 	return nil
+}
+
+// setPolymorphic sets the current block as having a polymorphic stack
+// blocks created under it will be polymorphic too. All type-checking
+// is ignored in a polymorhpic stack.
+// (See https://github.com/WebAssembly/design/blob/27ac254c854994103c24834a994be16f74f54186/Semantics.md#validation)
+func (vm *mockVM) setPolymorphic() {
+	if len(vm.blocks) == 0 {
+		vm.polymorphic = true
+	} else {
+
+		vm.blocks[len(vm.blocks)-1].polymorphic = true
+	}
+}
+
+func (vm *mockVM) isPolymorphic() bool {
+	if len(vm.blocks) == 0 {
+		return vm.polymorphic
+	}
+
+	return vm.topBlock().polymorphic
 }
 
 func (vm *mockVM) pc() int {
