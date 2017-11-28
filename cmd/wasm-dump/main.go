@@ -54,86 +54,90 @@ func main() {
 	}
 
 	if *flagHeaders {
-		fmt.Printf("%s: module version: %#x\n", f.Name(), m.Version)
-		fmt.Printf("Sections:\n\n")
+		printHeaders(f.Name(), m)
+	}
+}
 
-		hdrfmt := "%9s start=0x%08x end=0x%08x (size=0x%08x) count: %2d\n"
-		if sec := m.Types; sec != nil {
-			fmt.Printf(hdrfmt,
-				sec.ID.String(),
-				sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
-				len(sec.Entries),
-			)
-		}
-		if sec := m.Import; sec != nil {
-			fmt.Printf(hdrfmt,
-				sec.ID.String(),
-				sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
-				len(sec.Entries),
-			)
-		}
-		if sec := m.Function; sec != nil {
-			fmt.Printf(hdrfmt,
-				sec.ID.String(),
-				sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
-				len(sec.Types),
-			)
-		}
-		if sec := m.Table; sec != nil {
-			fmt.Printf(hdrfmt,
-				sec.ID.String(),
-				sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
-				len(sec.Entries),
-			)
-		}
-		if sec := m.Memory; sec != nil {
-			fmt.Printf(hdrfmt,
-				sec.ID.String(),
-				sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
-				len(sec.Entries),
-			)
-		}
-		if sec := m.Global; sec != nil {
-			fmt.Printf(hdrfmt,
-				sec.ID.String(),
-				sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
-				len(sec.Globals),
-			)
-		}
-		if sec := m.Export; sec != nil {
-			fmt.Printf(hdrfmt,
-				sec.ID.String(),
-				sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
-				len(sec.Entries),
-			)
-		}
-		if sec := m.Elements; sec != nil {
-			fmt.Printf(hdrfmt,
-				sec.ID.String(),
-				sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
-				len(sec.Entries),
-			)
-		}
-		if sec := m.Code; sec != nil {
-			fmt.Printf(hdrfmt,
-				sec.ID.String(),
-				sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
-				len(sec.Bodies),
-			)
-		}
-		if sec := m.Data; sec != nil {
-			fmt.Printf(hdrfmt,
-				sec.ID.String(),
-				sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
-				len(sec.Entries),
-			)
-		}
-		for _, sec := range m.Other {
-			fmt.Printf("%9s start=0x%08x end=0x%08x (size=0x%08x) %q\n",
-				sec.ID.String(),
-				sec.Start, sec.End, sec.PayloadLen,
-				sec.Name,
-			)
-		}
+func printHeaders(fname string, m *wasm.Module) {
+	fmt.Printf("%s: module version: %#x\n\n", fname, m.Version)
+	fmt.Printf("sections:\n\n")
+
+	hdrfmt := "%9s start=0x%08x end=0x%08x (size=0x%08x) count: %d\n"
+	if sec := m.Types; sec != nil {
+		fmt.Printf(hdrfmt,
+			sec.ID.String(),
+			sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
+			len(sec.Entries),
+		)
+	}
+	if sec := m.Import; sec != nil {
+		fmt.Printf(hdrfmt,
+			sec.ID.String(),
+			sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
+			len(sec.Entries),
+		)
+	}
+	if sec := m.Function; sec != nil {
+		fmt.Printf(hdrfmt,
+			sec.ID.String(),
+			sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
+			len(sec.Types),
+		)
+	}
+	if sec := m.Table; sec != nil {
+		fmt.Printf(hdrfmt,
+			sec.ID.String(),
+			sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
+			len(sec.Entries),
+		)
+	}
+	if sec := m.Memory; sec != nil {
+		fmt.Printf(hdrfmt,
+			sec.ID.String(),
+			sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
+			len(sec.Entries),
+		)
+	}
+	if sec := m.Global; sec != nil {
+		fmt.Printf(hdrfmt,
+			sec.ID.String(),
+			sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
+			len(sec.Globals),
+		)
+	}
+	if sec := m.Export; sec != nil {
+		fmt.Printf(hdrfmt,
+			sec.ID.String(),
+			sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
+			len(sec.Entries),
+		)
+	}
+	if sec := m.Elements; sec != nil {
+		fmt.Printf(hdrfmt,
+			sec.ID.String(),
+			sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
+			len(sec.Entries),
+		)
+	}
+	if sec := m.Code; sec != nil {
+		fmt.Printf(hdrfmt,
+			sec.ID.String(),
+			sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
+			len(sec.Bodies),
+		)
+	}
+	if sec := m.Data; sec != nil {
+		fmt.Printf(hdrfmt,
+			sec.ID.String(),
+			sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
+			len(sec.Entries),
+		)
+	}
+	for _, sec := range m.Other {
+		fmt.Printf("%9s start=0x%08x end=0x%08x (size=0x%08x) %q\n",
+			sec.ID.String(),
+			sec.Start, sec.End, sec.PayloadLen,
+			sec.Name,
+		)
 	}
 }
