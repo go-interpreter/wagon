@@ -49,9 +49,7 @@ type Module struct {
 	TableIndexSpace        [][]uint32
 	LinearMemoryIndexSpace [][]byte
 
-	// Name *SectionName
-
-	Other []Section
+	Other []Section // Other holds the custom sections if any
 }
 
 // ResolveFunc is a function that takes a module name and

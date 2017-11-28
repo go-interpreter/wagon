@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 
 	"github.com/go-interpreter/wagon/wasm/internal/readpos"
 	"github.com/go-interpreter/wagon/wasm/leb128"
@@ -135,7 +136,7 @@ func (m *Module) readSection(r *readpos.ReadPos) (bool, error) {
 		if err = m.readSectionCustom(sectionReader); err == nil {
 			s.End = r.CurPos
 			s.Bytes = sectionBytes.Bytes()
-			m.Import.Section = s
+			m.Other = append(m.Other, s)
 		}
 	case SectionIDType:
 		logger.Println("section type")
@@ -223,8 +224,7 @@ func (m *Module) readSection(r *readpos.ReadPos) (bool, error) {
 }
 
 func (m *Module) readSectionCustom(r io.Reader) error {
-	// TODO: Read custom sections
-	_, err := io.Copy(new(bytes.Buffer), r)
+	_, err := io.Copy(ioutil.Discard, r)
 	return err
 }
 
