@@ -10,16 +10,16 @@ import (
 	"os"
 )
 
-var PrintDebugInfo = true
-
 var logger *log.Logger
 
 func init() {
-	w := ioutil.Discard
+	SetDebugMode(true)
+}
 
-	if PrintDebugInfo {
+func SetDebugMode(dbg bool) {
+	w := ioutil.Discard
+	if dbg {
 		w = os.Stderr
 	}
-
 	logger = log.New(w, "", log.Lshortfile)
 }
