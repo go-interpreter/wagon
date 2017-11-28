@@ -132,7 +132,9 @@ func (m *Module) readSection(r *readpos.ReadPos) (bool, error) {
 	switch s.ID {
 	case SectionIDCustom:
 		logger.Println("section custom")
-		// TODO: Read custom sections
+		if err = m.readSectionCustom(sectionReader); err == nil {
+			// TODO: Read custom sections
+		}
 	case SectionIDType:
 		logger.Println("section type")
 		if err = m.readSectionTypes(sectionReader); err == nil {
@@ -197,6 +199,11 @@ func (m *Module) readSection(r *readpos.ReadPos) (bool, error) {
 
 	logger.Println(err)
 	return false, err
+}
+
+func (m *Module) readSectionCustom(r io.Reader) error {
+	_, err := io.Copy(new(bytes.Buffer), r)
+	return err
 }
 
 // SectionTypes declares all function signatures that will be used in a module.
