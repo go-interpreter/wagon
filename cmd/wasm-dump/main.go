@@ -128,14 +128,12 @@ func main() {
 				len(sec.Entries),
 			)
 		}
-		/*
-			if sec := m.Custom; sec != nil {
-				fmt.Printf(hdrfmt,
-					sec.ID.String(),
-					sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
-					len(sec.Entries),
-				)
-			}
-		*/
+		for _, sec := range m.Other {
+			fmt.Printf("%9s start=0x%08x end=0x%08x (size=0x%08x) %q\n",
+				sec.ID.String(),
+				sec.Start, sec.End, sec.PayloadLen,
+				sec.Name,
+			)
+		}
 	}
 }
