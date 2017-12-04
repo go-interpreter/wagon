@@ -6,6 +6,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
 
@@ -58,12 +59,32 @@ func main() {
 		log.Fatalf("could not create VM: %v", err)
 	}
 
-	for i, e := range m.Export.Entries {
-		log.Printf("%q: %#v", i, e)
-		o, err := vm.ExecCode(int64(e.Index))
+	for name, e := range m.Export.Entries {
+		i := int64(e.Index)
+		fidx := m.Function.Types[int(i)]
+		ftype := m.Types.Entries[int(fidx)]
+		switch len(ftype.ReturnTypes) {
+		case 1:
+			fmt.Printf("%s() %s => ", name, ftype.ReturnTypes[0])
+		case 0:
+			fmt.Printf("%s() => ", name)
+		default:
+			log.Printf("running exported functions with more than one return value is not supported")
+			continue
+		}
+		if len(ftype.ParamTypes) > 0 {
+			log.Printf("running exported functions with input parameters is not supported")
+			continue
+		}
+		o, err := vm.ExecCode(i)
 		if err != nil {
+			fmt.Printf("\n")
 			log.Printf("err=%v", err)
 		}
-		log.Printf("%[1]v (%[1]T)", o)
+		if len(ftype.ReturnTypes) == 0 {
+			fmt.Printf("\n")
+			continue
+		}
+		fmt.Printf("%[1]v (%[1]T)\n", o)
 	}
 }
