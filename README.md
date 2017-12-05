@@ -6,6 +6,8 @@ wagon
 
 `wagon` is a [WebAssembly](http://webassembly.org)-based interpreter in [Go](https://golang.org), for [Go](https://golang.org).
 
+**NOTE:** `wagon` requires `Go >= 1.9.x`.
+
 ## Purpose
 
 `wagon` aims to provide tools (executables+libraries) to:
