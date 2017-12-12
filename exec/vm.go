@@ -134,6 +134,11 @@ func NewVM(module *wasm.Module) (*VM, error) {
 	return &vm, nil
 }
 
+// Memory returns the linear memory space for the VM.
+func (vm *VM) Memory() []byte {
+	return vm.memory
+}
+
 func (vm *VM) pushBool(v bool) {
 	if v {
 		vm.pushUint64(1)
