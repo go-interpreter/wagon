@@ -15,6 +15,7 @@ import (
 	"sort"
 
 	"github.com/go-interpreter/wagon/disasm"
+	"github.com/go-interpreter/wagon/validate"
 	"github.com/go-interpreter/wagon/wasm"
 	"github.com/go-interpreter/wagon/wasm/leb128"
 )
@@ -78,7 +79,7 @@ func process(fname string) {
 	}
 	defer f.Close()
 
-	m, err := wasm.ReadModule(f, nil)
+	m, err := wasm.ReadModule(f, importer)
 	if err != nil {
 		log.Fatalf("could not read module: %v", err)
 	}
@@ -392,4 +393,21 @@ func printDetails(fname string, m *wasm.Module) {
 			fmt.Printf(" - func[%d] %v\n", i, string(str))
 		}
 	}
+}
+
+func importer(name string) (*wasm.Module, error) {
+	f, err := os.Open(name + ".wasm")
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	m, err := wasm.ReadModule(f, nil)
+	if err != nil {
+		return nil, err
+	}
+	err = validate.VerifyModule(m)
+	if err != nil {
+		return nil, err
+	}
+	return m, nil
 }

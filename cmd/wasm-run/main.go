@@ -38,7 +38,7 @@ func main() {
 	}
 	defer f.Close()
 
-	m, err := wasm.ReadModule(f, nil)
+	m, err := wasm.ReadModule(f, importer)
 	if err != nil {
 		log.Fatalf("could not read module: %v", err)
 	}
@@ -87,4 +87,21 @@ func main() {
 		}
 		fmt.Printf("%[1]v (%[1]T)\n", o)
 	}
+}
+
+func importer(name string) (*wasm.Module, error) {
+	f, err := os.Open(name + ".wasm")
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	m, err := wasm.ReadModule(f, nil)
+	if err != nil {
+		return nil, err
+	}
+	err = validate.VerifyModule(m)
+	if err != nil {
+		return nil, err
+	}
+	return m, nil
 }
