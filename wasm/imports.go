@@ -85,7 +85,7 @@ func (e ExportNotFoundError) Error() string {
 type InvalidFunctionIndexError uint32
 
 func (e InvalidFunctionIndexError) Error() string {
-	return fmt.Sprintf("wasm: Invalid index to function index space: %#x", e)
+	return fmt.Sprintf("wasm: Invalid index to function index space: %#x", uint32(e))
 }
 
 func (module *Module) resolveImports(resolve ResolveFunc) error {
