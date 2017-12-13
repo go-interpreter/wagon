@@ -151,6 +151,14 @@ func printHeaders(fname string, m *wasm.Module) {
 			len(sec.Entries),
 		)
 	}
+	if sec := m.Start; sec != nil {
+		hdrfmt := "%9s start=0x%08x end=0x%08x (size=0x%08x) start: %d\n"
+		fmt.Printf(hdrfmt,
+			sec.ID.String(),
+			sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
+			sec.Index,
+		)
+	}
 	if sec := m.Elements; sec != nil {
 		fmt.Printf(hdrfmt,
 			sec.ID.String(),
@@ -206,6 +214,9 @@ func printFull(fname string, m *wasm.Module) {
 		sections = append(sections, &sec.Section)
 	}
 	if sec := m.Export; sec != nil {
+		sections = append(sections, &sec.Section)
+	}
+	if sec := m.Start; sec != nil {
 		sections = append(sections, &sec.Section)
 	}
 	if sec := m.Elements; sec != nil {
@@ -335,6 +346,10 @@ func printDetails(fname string, m *wasm.Module) {
 			e := sec.Entries[name]
 			fmt.Printf(" - %v[%d] -> %q\n", e.Kind, e.Index, name)
 		}
+	}
+	if sec := m.Start; sec != nil {
+		fmt.Printf("%v:\n", sec.ID)
+		fmt.Printf(" - start function: %d\n", sec.Index)
 	}
 	if sec := m.Elements; sec != nil {
 		fmt.Printf("%v:\n", sec.ID)
