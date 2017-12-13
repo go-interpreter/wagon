@@ -51,6 +51,10 @@ func (m *Module) populateFunctions() error {
 		m.FunctionIndexSpace = append(m.FunctionIndexSpace, fn)
 	}
 
+	funcs := make([]uint32, 0, len(m.Function.Types)+len(m.imports.Funcs))
+	funcs = append(funcs, m.imports.Funcs...)
+	funcs = append(funcs, m.Function.Types...)
+	m.Function.Types = funcs
 	return nil
 }
 

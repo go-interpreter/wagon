@@ -50,6 +50,13 @@ type Module struct {
 	LinearMemoryIndexSpace [][]byte
 
 	Other []Section // Other holds the custom sections if any
+
+	imports struct {
+		Funcs    []uint32
+		Globals  int
+		Tables   int
+		Memories int
+	}
 }
 
 // ResolveFunc is a function that takes a module name and
@@ -90,7 +97,13 @@ func ReadModule(r io.Reader, resolvePath ResolveFunc) (*Module, error) {
 	}
 
 	if m.Import != nil {
-		return nil, errors.New("Imports aren't supported")
+		if resolvePath == nil {
+			return nil, errors.New("wasm: no module importer provided")
+		}
+		err := m.resolveImports(resolvePath)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	for _, fn := range []func() error{

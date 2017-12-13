@@ -95,6 +95,7 @@ func (module *Module) resolveImports(resolve ResolveFunc) error {
 
 	modules := make(map[string]*Module)
 
+	var funcs uint32
 	for _, importEntry := range module.Import.Entries {
 		importedModule, ok := modules[importEntry.ModuleName]
 		if !ok {
@@ -134,6 +135,9 @@ func (module *Module) resolveImports(resolve ResolveFunc) error {
 				return InvalidFunctionIndexError(index)
 			}
 			module.FunctionIndexSpace = append(module.FunctionIndexSpace, *fn)
+			module.Code.Bodies = append(module.Code.Bodies, *fn.Body)
+			module.imports.Funcs = append(module.imports.Funcs, funcs)
+			funcs++
 		case ExternalGlobal:
 			glb := importedModule.GetGlobal(int(index))
 			if glb == nil {
@@ -143,6 +147,7 @@ func (module *Module) resolveImports(resolve ResolveFunc) error {
 				return ErrImportMutGlobal
 			}
 			module.GlobalIndexSpace = append(module.GlobalIndexSpace, *glb)
+			module.imports.Globals++
 
 			// In both cases below, index should be always 0 (according to the MVP)
 			// We check it against the length of the index space anyway.
@@ -151,16 +156,16 @@ func (module *Module) resolveImports(resolve ResolveFunc) error {
 				return InvalidTableIndexError(index)
 			}
 			module.TableIndexSpace[0] = importedModule.TableIndexSpace[0]
+			module.imports.Tables++
 		case ExternalMemory:
 			if int(index) >= len(importedModule.LinearMemoryIndexSpace) {
 				return InvalidLinearMemoryIndexError(index)
 			}
 			module.LinearMemoryIndexSpace[0] = importedModule.LinearMemoryIndexSpace[0]
+			module.imports.Memories++
 		default:
 			return InvalidExternalError(exportEntry.Kind)
 		}
-
 	}
-
 	return nil
 }
