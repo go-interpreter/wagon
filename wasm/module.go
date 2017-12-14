@@ -96,10 +96,7 @@ func ReadModule(r io.Reader, resolvePath ResolveFunc) (*Module, error) {
 		m.TableIndexSpace = make([][]uint32, int(len(m.Table.Entries)))
 	}
 
-	if m.Import != nil {
-		if resolvePath == nil {
-			return nil, errors.New("wasm: no module importer provided")
-		}
+	if m.Import != nil && resolvePath != nil {
 		err := m.resolveImports(resolvePath)
 		if err != nil {
 			return nil, err
