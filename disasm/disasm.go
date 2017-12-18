@@ -157,7 +157,7 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 			}
 		case ops.Select:
 			if !instr.Unreachable {
-				stackDepths.SetTop(stackDepths.Top() - 3)
+				stackDepths.SetTop(stackDepths.Top() - 2)
 			}
 		case ops.Return:
 			if !instr.Unreachable {
@@ -351,10 +351,18 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 				instr.Immediates = append(instr.Immediates, reserved)
 			}
 			if !instr.Unreachable {
-				fn := module.GetFunction(int(index))
+				var sig *wasm.FunctionSig
+				if op == ops.CallIndirect {
+					if module.Types == nil {
+						return nil, errors.New("missing types section")
+					}
+					sig = &module.Types.Entries[index]
+				} else {
+					sig = module.GetFunction(int(index)).Sig
+				}
 				top := int(stackDepths.Top())
-				top -= len(fn.Sig.ParamTypes)
-				top += len(fn.Sig.ReturnTypes)
+				top -= len(sig.ParamTypes)
+				top += len(sig.ReturnTypes)
 				stackDepths.SetTop(uint64(top))
 				disas.checkMaxDepth(top)
 			}
