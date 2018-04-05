@@ -81,5 +81,5 @@ func (vm *VM) callIndirect() {
 		}
 	}
 
-	vm.doCall(vm.compiledFuncs[elemIndex], int64(index))
+	vm.doCall(vm.compiledFuncs[elemIndex], int64(elemIndex))
 }
