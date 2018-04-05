@@ -246,9 +246,8 @@ func (vm *VM) ExecCode(fnIndex int64, args ...uint64) (interface{}, error) {
 		return nil, ErrInvalidArgumentCount
 	}
 	compiled := vm.compiledFuncs[fnIndex]
-	if len(vm.ctx.stack) < compiled.maxDepth {
-		vm.ctx.stack = make([]uint64, 0, compiled.maxDepth)
-	}
+
+	vm.ctx.stack = make([]uint64, 0, compiled.maxDepth)
 	vm.ctx.locals = make([]uint64, compiled.totalLocalVars)
 	vm.ctx.pc = 0
 	vm.ctx.code = compiled.code
