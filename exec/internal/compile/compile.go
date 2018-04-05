@@ -181,14 +181,15 @@ func Compile(disassembly []disasm.Instr) ([]byte, []*BranchTable) {
 			}
 			continue
 		case ops.Else:
-			// add code for jumping out of a taken if branch
-			if instr.NewStack != nil && instr.NewStack.StackTopDiff != 0 {
-				if instr.NewStack.PreserveTop {
+			ifInstr := disassembly[instr.Block.ElseIfIndex] // the corresponding `if` instruction for this else
+			if ifInstr.NewStack != nil && ifInstr.NewStack.StackTopDiff != 0 {
+				// add code for jumping out of a taken if branch
+				if ifInstr.NewStack.PreserveTop {
 					buffer.WriteByte(OpDiscardPreserveTop)
 				} else {
 					buffer.WriteByte(OpDiscard)
 				}
-				binary.Write(buffer, binary.LittleEndian, instr.NewStack.StackTopDiff)
+				binary.Write(buffer, binary.LittleEndian, ifInstr.NewStack.StackTopDiff)
 			}
 			buffer.WriteByte(OpJmp)
 			ifBlockEndOffset := int64(buffer.Len())
