@@ -362,15 +362,16 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 			}
 			if !instr.Unreachable {
 				var sig *wasm.FunctionSig
+				top := int(stackDepths.Top())
 				if op == ops.CallIndirect {
 					if module.Types == nil {
 						return nil, errors.New("missing types section")
 					}
 					sig = &module.Types.Entries[index]
+					top--
 				} else {
 					sig = module.GetFunction(int(index)).Sig
 				}
-				top := int(stackDepths.Top())
 				top -= len(sig.ParamTypes)
 				top += len(sig.ReturnTypes)
 				stackDepths.SetTop(uint64(top))
