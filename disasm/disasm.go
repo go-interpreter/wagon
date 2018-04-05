@@ -52,10 +52,16 @@ type StackInfo struct {
 type BlockInfo struct {
 	Start     bool           // If true, this instruction starts a block. Else this instruction ends it.
 	Signature wasm.BlockType // The block signature
-	// The index to the accompanying control operator.
-	// For 'if', this is an index to the 'else' operator
-	// For else/loop/block, the index is to the 'end' operator
-	PairIndex int
+
+	// Indices to the accompanying control operator.
+	// For 'if', this is the index to the 'else' operator.
+	IfElseIndex int
+	// For 'else', this is the index to the 'if' operator.
+	ElseIfIndex int
+	// The index to the `end' operator for if/else/loop/block.
+	EndIndex int
+	// For end, it is the index to the operator that starts the block.
+	BlockStartIndex int
 }
 
 // Disassembly is the result of disassembling a WebAssembly function.
@@ -173,10 +179,14 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 			instr.Block = &BlockInfo{
 				Start:     false,
 				Signature: blockSig,
-				PairIndex: int(blockStartIndex),
 			}
-
-			disas.Code[blockStartIndex].Block.PairIndex = curIndex
+			if op == ops.End {
+				instr.Block.BlockStartIndex = int(blockStartIndex)
+				disas.Code[blockStartIndex].Block.EndIndex = curIndex
+			} else { // ops.Else
+				instr.Block.ElseIfIndex = int(blockStartIndex)
+				disas.Code[blockStartIndex].Block.IfElseIndex = int(blockStartIndex)
+			}
 
 			// The max depth reached while execing the last block
 			// If the signature of the current block is not empty,
