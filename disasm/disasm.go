@@ -139,7 +139,7 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 			instr.Unreachable = !isInstrReachable(blockPolymorphicOps)
 		}
 
-		logger.Printf("op: %s, ureachable: %v", opStr.Name, instr.Unreachable)
+		logger.Printf("op: %s, unreachable: %v", opStr.Name, instr.Unreachable)
 		if !opStr.Polymorphic && !instr.Unreachable {
 			top := int(stackDepths.Top())
 			top -= len(opStr.Args)
@@ -211,10 +211,12 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 					StackTopDiff: int64(elemsDiscard),
 					PreserveTop:  blockSig != wasm.BlockTypeEmpty,
 				}
+				logger.Printf("discard %d elements, preserve top: %v", elemsDiscard, instr.NewStack.PreserveTop)
 			} else {
 				instr.NewStack = &StackInfo{}
 			}
 
+			logger.Printf("setting new stack for %s block (%d)", disas.Code[blockStartIndex].Op.Name, blockStartIndex)
 			disas.Code[blockStartIndex].NewStack = instr.NewStack
 			if !instr.Unreachable {
 				blockPolymorphicOps = blockPolymorphicOps[:len(blockPolymorphicOps)-1]
@@ -455,6 +457,10 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 
 		disas.Code = append(disas.Code, instr)
 		curIndex++
+	}
+
+	for _, instr := range disas.Code {
+		logger.Printf("%v %v", instr.Op.Name, instr.NewStack)
 	}
 
 	return disas, nil
