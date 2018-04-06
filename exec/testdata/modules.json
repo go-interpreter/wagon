@@ -1106,5 +1106,15 @@
         "return": "i32:0"
       }
     ]
+  },
+  {
+    "file": "bug-49.wasm",
+    "tests": [
+      {
+        "function": "sample",
+        "args": [],
+        "trap": "i32:1"
+      }
+    ]
   }
 ]
