@@ -459,8 +459,10 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 		curIndex++
 	}
 
-	for _, instr := range disas.Code {
-		logger.Printf("%v %v", instr.Op.Name, instr.NewStack)
+	if logging {
+		for _, instr := range disas.Code {
+			logger.Printf("%v %v", instr.Op.Name, instr.NewStack)
+		}
 	}
 
 	return disas, nil

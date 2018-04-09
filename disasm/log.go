@@ -10,10 +10,14 @@ import (
 	"os"
 )
 
-var logger *log.Logger
+var (
+	logger  *log.Logger
+	logging bool
+)
 
 func SetDebugMode(l bool) {
 	w := ioutil.Discard
+	logging = l
 
 	if l {
 		w = os.Stderr
