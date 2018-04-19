@@ -2418,6 +2418,23 @@
     ]
   },
   {
+    "file": "unreachable.wasm",
+    "tests": [
+      {
+        "trap": "exec: reached unreachable",
+        "args": [],
+        "function": "main",
+        "recoverpanic": false
+      },
+      {
+        "errormsg": "exec: reached unreachable",
+        "args": [],
+        "function": "main",
+        "recoverpanic": true
+      }
+    ]
+  },
+  {
     "file": "unwind.wasm",
     "tests": [
       {

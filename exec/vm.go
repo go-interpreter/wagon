@@ -60,6 +60,13 @@ type VM struct {
 	compiledFuncs []compiledFunction
 
 	funcTable [256]func()
+
+	// RecoverPanic controls whether the `ExecCode` method
+	// recovers from a panic and returns it as an error
+	// instead.
+	// A panic can occur either when executing an invalid VM
+	// or encountering an invalid instruction, e.g. `unreachable`.
+	RecoverPanic bool
 }
 
 // As per the WebAssembly spec: https://github.com/WebAssembly/design/blob/27ac254c854994103c24834a994be16f74f54186/Semantics.md#linear-memory
@@ -238,7 +245,21 @@ func (vm *VM) pushFloat32(f float32) {
 // ExecCode calls the function with the given index and arguments.
 // fnIndex should be a valid index into the function index space of
 // the VM's module.
-func (vm *VM) ExecCode(fnIndex int64, args ...uint64) (interface{}, error) {
+func (vm *VM) ExecCode(fnIndex int64, args ...uint64) (rtrn interface{}, err error) {
+	// If used as a library, client code should set vm.RecoverPanic to true
+	// in order to have an error returned.
+	if vm.RecoverPanic {
+		defer func() {
+			if r := recover(); r != nil {
+				switch e := r.(type) {
+				case error:
+					err = e
+				default:
+					err = fmt.Errorf("exec: %v", e)
+				}
+			}
+		}()
+	}
 	if int(fnIndex) > len(vm.compiledFuncs) {
 		return nil, InvalidFunctionIndexError(fnIndex)
 	}
@@ -257,7 +278,6 @@ func (vm *VM) ExecCode(fnIndex int64, args ...uint64) (interface{}, error) {
 		vm.ctx.locals[i] = arg
 	}
 
-	var rtrn interface{}
 	res := vm.execCode(compiled)
 	if compiled.returns {
 		rtrnType := vm.module.GetFunction(int(fnIndex)).Sig.ReturnTypes[0]

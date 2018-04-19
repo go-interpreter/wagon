@@ -28,10 +28,12 @@ const (
 )
 
 type testCase struct {
-	Function string   `json:"function"`
-	Args     []string `json:"args"`
-	Return   string   `json:"return"`
-	Trap     string   `json:"trap"`
+	Function     string   `json:"function"`
+	Args         []string `json:"args"`
+	Return       string   `json:"return"`
+	Trap         string   `json:"trap"`
+	RecoverPanic bool     `json:"recoverpanic,omitempty"`
+	ErrorMsg     string   `json:"errormsg"`
 }
 
 type file struct {
@@ -296,6 +298,8 @@ func runTest(fileName string, testCases []testCase, t testing.TB) {
 			continue
 		}
 
+		vm.RecoverPanic = (testCase.RecoverPanic == true)
+
 		times := 1
 
 		if ok {
@@ -313,7 +317,7 @@ func runTest(fileName string, testCases []testCase, t testing.TB) {
 			b.StopTimer()
 		}
 
-		if err != nil {
+		if err != nil && err.Error() != testCase.ErrorMsg {
 			t.Fatalf("%s, %s: %v", fileName, testCase.Function, err)
 		}
 
