@@ -54,10 +54,10 @@ type context struct {
 type VM struct {
 	ctx context
 
-	module        *wasm.Module
-	globals       []uint64
-	memory        []byte
-	compiledFuncs []compiledFunction
+	module  *wasm.Module
+	globals []uint64
+	memory  []byte
+	funcs   []function
 
 	funcTable [256]func()
 
@@ -87,12 +87,28 @@ func NewVM(module *wasm.Module) (*VM, error) {
 		copy(vm.memory, module.LinearMemoryIndexSpace[0])
 	}
 
-	vm.compiledFuncs = make([]compiledFunction, len(module.FunctionIndexSpace))
+	vm.funcs = make([]function, len(module.FunctionIndexSpace))
 	vm.globals = make([]uint64, len(module.GlobalIndexSpace))
 	vm.newFuncTable()
 	vm.module = module
 
+	nNatives := 0
 	for i, fn := range module.FunctionIndexSpace {
+		// Skip native methods as they need not be
+		// disassembled; simply add them at the end
+		// of the `funcs` array as is, as specified
+		// in the spec. See the "host functions"
+		// section of:
+		// https://webassembly.github.io/spec/core/exec/modules.html#allocation
+		if fn.IsHost() {
+			vm.funcs[i] = goFunction{
+				typ: fn.Host.Type(),
+				val: fn.Host,
+			}
+			nNatives++
+			continue
+		}
+
 		disassembly, err := disasm.Disassemble(fn, module)
 		if err != nil {
 			return nil, err
@@ -104,7 +120,7 @@ func NewVM(module *wasm.Module) (*VM, error) {
 			totalLocalVars += int(entry.Count)
 		}
 		code, table := compile.Compile(disassembly.Code)
-		vm.compiledFuncs[i] = compiledFunction{
+		vm.funcs[i] = compiledFunction{
 			code:           code,
 			branchTables:   table,
 			maxDepth:       disassembly.MaxDepth,
@@ -260,15 +276,19 @@ func (vm *VM) ExecCode(fnIndex int64, args ...uint64) (rtrn interface{}, err err
 			}
 		}()
 	}
-	if int(fnIndex) > len(vm.compiledFuncs) {
+	if int(fnIndex) > len(vm.funcs) {
 		return nil, InvalidFunctionIndexError(fnIndex)
 	}
 	if len(vm.module.GetFunction(int(fnIndex)).Sig.ParamTypes) != len(args) {
 		return nil, ErrInvalidArgumentCount
 	}
-	compiled := vm.compiledFuncs[fnIndex]
-
-	vm.ctx.stack = make([]uint64, 0, compiled.maxDepth)
+	compiled, ok := vm.funcs[fnIndex].(compiledFunction)
+	if !ok {
+		panic(fmt.Sprintf("exec: function at index %d is not a compiled function", fnIndex))
+	}
+	if len(vm.ctx.stack) < compiled.maxDepth {
+		vm.ctx.stack = make([]uint64, 0, compiled.maxDepth)
+	}
 	vm.ctx.locals = make([]uint64, compiled.totalLocalVars)
 	vm.ctx.pc = 0
 	vm.ctx.code = compiled.code
@@ -334,7 +354,11 @@ outer:
 		case ops.BrTable:
 			index := vm.fetchInt64()
 			label := vm.popInt32()
-			table := vm.compiledFuncs[vm.ctx.curFunc].branchTables[index]
+			cf, ok := vm.funcs[vm.ctx.curFunc].(compiledFunction)
+			if !ok {
+				panic(fmt.Sprintf("exec: function at index %d is not a compiled function", vm.ctx.curFunc))
+			}
+			table := cf.branchTables[index]
 			var target compile.Target
 			if label >= 0 && label < int32(len(table.Targets)) {
 				target = table.Targets[int32(label)]

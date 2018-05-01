@@ -7,6 +7,7 @@ package wasm
 import (
 	"errors"
 	"io"
+	"reflect"
 
 	"github.com/go-interpreter/wagon/wasm/internal/readpos"
 )
@@ -22,6 +23,13 @@ const (
 type Function struct {
 	Sig  *FunctionSig
 	Body *FunctionBody
+	Host reflect.Value
+}
+
+// IsHost indicates whether this function is a host function as defined in:
+//  https://webassembly.github.io/spec/core/exec/modules.html#host-functions
+func (fct *Function) IsHost() bool {
+	return fct.Host != reflect.Value{}
 }
 
 // Module represents a parsed WebAssembly module:
@@ -44,6 +52,7 @@ type Module struct {
 	// The function index space of the module
 	FunctionIndexSpace []Function
 	GlobalIndexSpace   []GlobalEntry
+
 	// function indices into the global function space
 	// the limit of each table is its capacity (cap)
 	TableIndexSpace        [][]uint32
@@ -56,6 +65,21 @@ type Module struct {
 		Globals  int
 		Tables   int
 		Memories int
+	}
+}
+
+// NewModule creates a new empty module
+func NewModule() *Module {
+	return &Module{
+		Types:    &SectionTypes{},
+		Import:   &SectionImports{},
+		Table:    &SectionTables{},
+		Memory:   &SectionMemories{},
+		Global:   &SectionGlobals{},
+		Export:   &SectionExports{},
+		Start:    &SectionStartFunction{},
+		Elements: &SectionElements{},
+		Data:     &SectionData{},
 	}
 }
 

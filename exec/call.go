@@ -6,35 +6,6 @@ package exec
 
 import "errors"
 
-func (vm *VM) doCall(compiled compiledFunction, index int64) {
-	newStack := make([]uint64, 0, compiled.maxDepth)
-	locals := make([]uint64, compiled.totalLocalVars)
-
-	for i := compiled.args - 1; i >= 0; i-- {
-		locals[i] = vm.popUint64()
-	}
-
-	// save execution context
-	prevCtxt := vm.ctx
-
-	vm.ctx = context{
-		stack:   newStack,
-		locals:  locals,
-		code:    compiled.code,
-		pc:      0,
-		curFunc: index,
-	}
-
-	rtrn := vm.execCode(compiled)
-
-	// restore execution context
-	vm.ctx = prevCtxt
-
-	if compiled.returns {
-		vm.pushUint64(rtrn)
-	}
-}
-
 var (
 	// ErrSignatureMismatch is the error value used while trapping the VM when
 	// a signature mismatch between the table entry and the type entry is found
@@ -48,7 +19,8 @@ var (
 
 func (vm *VM) call() {
 	index := vm.fetchUint32()
-	vm.doCall(vm.compiledFuncs[index], int64(index))
+
+	vm.funcs[index].call(vm, int64(index))
 }
 
 func (vm *VM) callIndirect() {
@@ -81,5 +53,5 @@ func (vm *VM) callIndirect() {
 		}
 	}
 
-	vm.doCall(vm.compiledFuncs[elemIndex], int64(elemIndex))
+	vm.funcs[elemIndex].call(vm, int64(elemIndex))
 }

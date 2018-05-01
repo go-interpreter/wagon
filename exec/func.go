@@ -45,7 +45,7 @@ func (fn goFunction) call(vm *VM, index int64) {
 		case reflect.Uint32, reflect.Uint64:
 			val.SetUint(raw)
 		case reflect.Int32, reflect.Int64:
-			val.SetUint(raw)
+			val.SetInt(int64(raw))
 		default:
 			panic(fmt.Sprintf("exec: args %d invalid kind=%v", i, kind))
 		}
