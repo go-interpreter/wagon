@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 
 	"github.com/go-interpreter/wagon/disasm"
@@ -67,6 +68,8 @@ type VM struct {
 	// A panic can occur either when executing an invalid VM
 	// or encountering an invalid instruction, e.g. `unreachable`.
 	RecoverPanic bool
+
+	abort bool // Flag for host functions to terminate execution
 }
 
 // As per the WebAssembly spec: https://github.com/WebAssembly/design/blob/27ac254c854994103c24834a994be16f74f54186/Semantics.md#linear-memory
@@ -320,7 +323,7 @@ func (vm *VM) ExecCode(fnIndex int64, args ...uint64) (rtrn interface{}, err err
 
 func (vm *VM) execCode(compiled compiledFunction) uint64 {
 outer:
-	for int(vm.ctx.pc) < len(vm.ctx.code) {
+	for int(vm.ctx.pc) < len(vm.ctx.code) && !vm.abort {
 		op := vm.ctx.code[vm.ctx.pc]
 		vm.ctx.pc++
 		switch op {
@@ -396,4 +399,64 @@ outer:
 		return vm.ctx.stack[len(vm.ctx.stack)-1]
 	}
 	return 0
+}
+
+// Process is a proxy passed to host functions in order to access
+// things such as memory and control.
+type Process struct {
+	vm *VM
+}
+
+// NewProcess creates a VM interface object for host functions
+func NewProcess(vm *VM) *Process {
+	return &Process{vm: vm}
+}
+
+// ReadAt implements the ReaderAt interface: it copies into p
+// the content of memory at offset off.
+func (proc *Process) ReadAt(p []byte, off int64) (int, error) {
+	mem := proc.vm.Memory()
+
+	var length int
+	if len(mem) < len(p)+int(off) {
+		length = len(mem) - int(off)
+	} else {
+		length = len(p)
+	}
+
+	copy(p, mem[off:off+int64(length)])
+
+	var err error
+	if length < len(p) {
+		err = io.ErrShortBuffer
+	}
+
+	return length, err
+}
+
+// WriteAt implements the WriterAt interface: it writes the content of p
+// into the VM memory at offset off.
+func (proc *Process) WriteAt(p []byte, off int64) (int, error) {
+	mem := proc.vm.Memory()
+
+	var length int
+	if len(mem) < len(p)+int(off) {
+		length = len(mem) - int(off)
+	} else {
+		length = len(p)
+	}
+
+	copy(mem[off:], p[:length])
+
+	var err error
+	if length < len(p) {
+		err = io.ErrShortWrite
+	}
+
+	return length, err
+}
+
+// Terminate stops the execution of the current module.
+func (proc *Process) Terminate() {
+	proc.vm.abort = true
 }

@@ -31,10 +31,20 @@ type goFunction struct {
 }
 
 func (fn goFunction) call(vm *VM, index int64) {
+	// numIn = # of call inputs + vm, as the function expects
+	// an additional *VM argument
 	numIn := fn.typ.NumIn()
 	args := make([]reflect.Value, numIn)
+	proc := NewProcess(vm)
 
-	for i := numIn - 1; i >= 0; i-- {
+	// Pass proc as an argument. Check that the function indeed
+	// expects a *Process argument.
+	if reflect.ValueOf(proc).Kind() != fn.typ.In(0).Kind() {
+		panic(fmt.Sprintf("exec: the first argument of a host function was %s, expected %s", fn.typ.In(0).Kind(), reflect.ValueOf(vm).Kind()))
+	}
+	args[0] = reflect.ValueOf(proc)
+
+	for i := numIn - 1; i >= 1; i-- {
 		val := reflect.New(fn.typ.In(i)).Elem()
 		raw := vm.popUint64()
 		kind := fn.typ.In(i).Kind()
