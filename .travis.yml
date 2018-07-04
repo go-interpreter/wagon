@@ -10,3 +10,11 @@ matrix:
    - go: master
 
 sudo: false
+
+script:
+ - go get -d -t -v ./...
+ - go install -v $TAGS ./...
+ - ./.ci/code-coverage.sh
+
+after_success:
+ - bash <(curl -s https://codecov.io/bash)
