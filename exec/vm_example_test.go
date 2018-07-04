@@ -44,7 +44,7 @@ func ExampleVM_add() {
 			// create a whole new module, called "go", from scratch.
 			// this module will contain one exported function "print",
 			// implemented itself in pure Go.
-			print := func(v int32) {
+			print := func(proc *exec.Process, v int32) {
 				fmt.Printf("result = %v\n", v)
 			}
 
