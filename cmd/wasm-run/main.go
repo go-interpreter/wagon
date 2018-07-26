@@ -7,6 +7,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 
@@ -32,7 +33,11 @@ func main() {
 
 	wasm.SetDebugMode(*verbose)
 
-	f, err := os.Open(flag.Arg(0))
+	run(os.Stdout, flag.Arg(0), *verify)
+}
+
+func run(w io.Writer, fname string, verify bool) {
+	f, err := os.Open(fname)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -43,7 +48,7 @@ func main() {
 		log.Fatalf("could not read module: %v", err)
 	}
 
-	if *verify {
+	if verify {
 		err = validate.VerifyModule(m)
 		if err != nil {
 			log.Fatalf("could not verify module: %v", err)
@@ -65,9 +70,9 @@ func main() {
 		ftype := m.Types.Entries[int(fidx)]
 		switch len(ftype.ReturnTypes) {
 		case 1:
-			fmt.Printf("%s() %s => ", name, ftype.ReturnTypes[0])
+			fmt.Fprintf(w, "%s() %s => ", name, ftype.ReturnTypes[0])
 		case 0:
-			fmt.Printf("%s() => ", name)
+			fmt.Fprintf(w, "%s() => ", name)
 		default:
 			log.Printf("running exported functions with more than one return value is not supported")
 			continue
@@ -78,14 +83,15 @@ func main() {
 		}
 		o, err := vm.ExecCode(i)
 		if err != nil {
-			fmt.Printf("\n")
+			fmt.Fprintf(w, "\n")
 			log.Printf("err=%v", err)
-		}
-		if len(ftype.ReturnTypes) == 0 {
-			fmt.Printf("\n")
 			continue
 		}
-		fmt.Printf("%[1]v (%[1]T)\n", o)
+		if len(ftype.ReturnTypes) == 0 {
+			fmt.Fprintf(w, "\n")
+			continue
+		}
+		fmt.Fprintf(w, "%[1]v (%[1]T)\n", o)
 	}
 }
 
