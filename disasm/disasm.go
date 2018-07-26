@@ -97,7 +97,7 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 	// A stack of int arrays holding indices to instructions that make the stack
 	// polymorphic. Each block has its corresponding array. We start with one
 	// array for the root stack
-	blockPolymorphicOps := [][]int{[]int{}}
+	blockPolymorphicOps := [][]int{{}}
 	// a stack of current execution stack depth values, so that the depth for each
 	// stack is maintained indepepdently for calculating discard values
 	stackDepths := &stack.Stack{}
