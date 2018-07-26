@@ -66,15 +66,16 @@ func main() {
 
 	wasm.SetDebugMode(*flagVerbose)
 
+	w := os.Stdout
 	for i, fname := range flag.Args() {
 		if i > 0 {
-			fmt.Printf("\n")
+			fmt.Fprintf(w, "\n")
 		}
-		process(fname)
+		process(w, fname)
 	}
 }
 
-func process(fname string) {
+func process(w io.Writer, fname string) {
 	f, err := os.Open(fname)
 	if err != nil {
 		log.Fatalf("could not open %q: %v", fname, err)
@@ -87,68 +88,68 @@ func process(fname string) {
 	}
 
 	if *flagHeaders {
-		printHeaders(f.Name(), m)
+		printHeaders(w, f.Name(), m)
 	}
 	if *flagFull {
-		printFull(f.Name(), m)
+		printFull(w, f.Name(), m)
 	}
 	if *flagDis {
-		printDis(f.Name(), m)
+		printDis(w, f.Name(), m)
 	}
 	if *flagDetails {
-		printDetails(f.Name(), m)
+		printDetails(w, f.Name(), m)
 	}
 }
 
-func printHeaders(fname string, m *wasm.Module) {
-	fmt.Printf("%s: module version: %#x\n\n", fname, m.Version)
-	fmt.Printf("sections:\n\n")
+func printHeaders(w io.Writer, fname string, m *wasm.Module) {
+	fmt.Fprintf(w, "%s: module version: %#x\n\n", fname, m.Version)
+	fmt.Fprintf(w, "sections:\n\n")
 
 	hdrfmt := "%9s start=0x%08x end=0x%08x (size=0x%08x) count: %d\n"
 	if sec := m.Types; sec != nil {
-		fmt.Printf(hdrfmt,
+		fmt.Fprintf(w, hdrfmt,
 			sec.ID.String(),
 			sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
 			len(sec.Entries),
 		)
 	}
 	if sec := m.Import; sec != nil {
-		fmt.Printf(hdrfmt,
+		fmt.Fprintf(w, hdrfmt,
 			sec.ID.String(),
 			sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
 			len(sec.Entries),
 		)
 	}
 	if sec := m.Function; sec != nil {
-		fmt.Printf(hdrfmt,
+		fmt.Fprintf(w, hdrfmt,
 			sec.ID.String(),
 			sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
 			len(sec.Types),
 		)
 	}
 	if sec := m.Table; sec != nil {
-		fmt.Printf(hdrfmt,
+		fmt.Fprintf(w, hdrfmt,
 			sec.ID.String(),
 			sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
 			len(sec.Entries),
 		)
 	}
 	if sec := m.Memory; sec != nil {
-		fmt.Printf(hdrfmt,
+		fmt.Fprintf(w, hdrfmt,
 			sec.ID.String(),
 			sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
 			len(sec.Entries),
 		)
 	}
 	if sec := m.Global; sec != nil {
-		fmt.Printf(hdrfmt,
+		fmt.Fprintf(w, hdrfmt,
 			sec.ID.String(),
 			sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
 			len(sec.Globals),
 		)
 	}
 	if sec := m.Export; sec != nil {
-		fmt.Printf(hdrfmt,
+		fmt.Fprintf(w, hdrfmt,
 			sec.ID.String(),
 			sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
 			len(sec.Entries),
@@ -156,35 +157,35 @@ func printHeaders(fname string, m *wasm.Module) {
 	}
 	if sec := m.Start; sec != nil {
 		hdrfmt := "%9s start=0x%08x end=0x%08x (size=0x%08x) start: %d\n"
-		fmt.Printf(hdrfmt,
+		fmt.Fprintf(w, hdrfmt,
 			sec.ID.String(),
 			sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
 			sec.Index,
 		)
 	}
 	if sec := m.Elements; sec != nil {
-		fmt.Printf(hdrfmt,
+		fmt.Fprintf(w, hdrfmt,
 			sec.ID.String(),
 			sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
 			len(sec.Entries),
 		)
 	}
 	if sec := m.Code; sec != nil {
-		fmt.Printf(hdrfmt,
+		fmt.Fprintf(w, hdrfmt,
 			sec.ID.String(),
 			sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
 			len(sec.Bodies),
 		)
 	}
 	if sec := m.Data; sec != nil {
-		fmt.Printf(hdrfmt,
+		fmt.Fprintf(w, hdrfmt,
 			sec.ID.String(),
 			sec.Section.Start, sec.Section.End, sec.Section.PayloadLen,
 			len(sec.Entries),
 		)
 	}
 	for _, sec := range m.Other {
-		fmt.Printf("%9s start=0x%08x end=0x%08x (size=0x%08x) %q\n",
+		fmt.Fprintf(w, "%9s start=0x%08x end=0x%08x (size=0x%08x) %q\n",
 			sec.ID.String(),
 			sec.Start, sec.End, sec.PayloadLen,
 			sec.Name,
@@ -192,8 +193,8 @@ func printHeaders(fname string, m *wasm.Module) {
 	}
 }
 
-func printFull(fname string, m *wasm.Module) {
-	fmt.Printf("%s: module version: %#x\n\n", fname, m.Version)
+func printFull(w io.Writer, fname string, m *wasm.Module) {
+	fmt.Fprintf(w, "%s: module version: %#x\n\n", fname, m.Version)
 
 	hdrfmt := "contents of section %s:\n"
 	var sections []*wasm.Section
@@ -236,17 +237,17 @@ func printFull(fname string, m *wasm.Module) {
 	}
 
 	for _, sec := range sections {
-		fmt.Printf(hdrfmt, sec.ID.String())
-		fmt.Println(hexDump(sec.Bytes, uint(sec.Start)))
+		fmt.Fprintf(w, hdrfmt, sec.ID.String())
+		fmt.Fprintln(w, hexDump(sec.Bytes, uint(sec.Start)))
 	}
 }
 
-func printDis(fname string, m *wasm.Module) {
-	fmt.Printf("%s: module version: %#x\n\n", fname, m.Version)
-	fmt.Printf("code disassembly:\n")
+func printDis(w io.Writer, fname string, m *wasm.Module) {
+	fmt.Fprintf(w, "%s: module version: %#x\n\n", fname, m.Version)
+	fmt.Fprintf(w, "code disassembly:\n")
 	for i := range m.Function.Types {
 		f := m.GetFunction(i)
-		fmt.Printf("\nfunc[%d]: %v\n", i, f.Sig)
+		fmt.Fprintf(w, "\nfunc[%d]: %v\n", i, f.Sig)
 		dis, err := disasm.Disassemble(*f, m)
 		if err != nil {
 			log.Fatal(err)
@@ -267,25 +268,25 @@ func printDis(fname string, m *wasm.Module) {
 				}
 				fmt.Fprintf(str, " %v", im)
 			}
-			fmt.Printf(" %06x: %-26s | %s\n", offset, buf.String(), str.String())
+			fmt.Fprintf(w, " %06x: %-26s | %s\n", offset, buf.String(), str.String())
 			offset += 2 * n
 		}
-		fmt.Printf(" %06x: %-26s | %s\n", offset, fmt.Sprintf("%02x", 0xb), "end")
+		fmt.Fprintf(w, " %06x: %-26s | %s\n", offset, fmt.Sprintf("%02x", 0xb), "end")
 	}
 }
 
-func printDetails(fname string, m *wasm.Module) {
-	fmt.Printf("%s: module version: %#x\n\n", fname, m.Version)
-	fmt.Printf("section details:\n\n")
+func printDetails(w io.Writer, fname string, m *wasm.Module) {
+	fmt.Fprintf(w, "%s: module version: %#x\n\n", fname, m.Version)
+	fmt.Fprintf(w, "section details:\n\n")
 
 	if sec := m.Types; sec != nil {
-		fmt.Printf("%v:\n", sec.ID)
+		fmt.Fprintf(w, "%v:\n", sec.ID)
 		for i, f := range sec.Entries {
-			fmt.Printf(" - type[%d] %v\n", i, f)
+			fmt.Fprintf(w, " - type[%d] %v\n", i, f)
 		}
 	}
 	if sec := m.Import; sec != nil {
-		fmt.Printf("%v:\n", sec.ID)
+		fmt.Fprintf(w, "%v:\n", sec.ID)
 		for i, e := range sec.Entries {
 			buf := new(bytes.Buffer)
 			switch typ := e.Type.(type) {
@@ -308,38 +309,38 @@ func printDetails(fname string, m *wasm.Module) {
 					typ.Type.Limits.Maximum,
 				)
 			}
-			fmt.Printf(" - %v[%d] %s <- %s.%s\n",
+			fmt.Fprintf(w, " - %v[%d] %s <- %s.%s\n",
 				e.Kind, i, buf.String(), e.ModuleName, e.FieldName,
 			)
 		}
 	}
 	if sec := m.Function; sec != nil {
-		fmt.Printf("%v:\n", sec.ID)
+		fmt.Fprintf(w, "%v:\n", sec.ID)
 		for i, t := range sec.Types {
-			fmt.Printf(" - func[%d] sig=%d\n", i, t)
+			fmt.Fprintf(w, " - func[%d] sig=%d\n", i, t)
 		}
 	}
 	if sec := m.Table; sec != nil {
-		fmt.Printf("%v:\n", sec.ID)
+		fmt.Fprintf(w, "%v:\n", sec.ID)
 		for i, e := range sec.Entries {
-			fmt.Printf(" - table[%d] type=%v initial=%v\n", i, e.ElementType, e.Limits.Initial)
+			fmt.Fprintf(w, " - table[%d] type=%v initial=%v\n", i, e.ElementType, e.Limits.Initial)
 		}
 	}
 	if sec := m.Memory; sec != nil {
-		fmt.Printf("%v:\n", sec.ID)
+		fmt.Fprintf(w, "%v:\n", sec.ID)
 		for i, e := range sec.Entries {
-			fmt.Printf(" - memory[%d] pages: initial=%v\n", i, e.Limits.Initial)
+			fmt.Fprintf(w, " - memory[%d] pages: initial=%v\n", i, e.Limits.Initial)
 		}
 	}
 	if sec := m.Global; sec != nil {
-		fmt.Printf("%v:\n", sec.ID)
+		fmt.Fprintf(w, "%v:\n", sec.ID)
 		for i, g := range sec.Globals {
 			// TODO(sbinet) display init infos
-			fmt.Printf(" - global[%d] %v mutable=%v -- init: %#v\n", i, g.Type.Type, g.Type.Mutable, g.Init)
+			fmt.Fprintf(w, " - global[%d] %v mutable=%v -- init: %#v\n", i, g.Type.Type, g.Type.Mutable, g.Init)
 		}
 	}
 	if sec := m.Export; sec != nil {
-		fmt.Printf("%v:\n", sec.ID)
+		fmt.Fprintf(w, "%v:\n", sec.ID)
 		keys := make([]string, 0, len(sec.Entries))
 		for n := range sec.Entries {
 			keys = append(keys, n)
@@ -347,33 +348,33 @@ func printDetails(fname string, m *wasm.Module) {
 		sort.Strings(keys)
 		for _, name := range keys {
 			e := sec.Entries[name]
-			fmt.Printf(" - %v[%d] -> %q\n", e.Kind, e.Index, name)
+			fmt.Fprintf(w, " - %v[%d] -> %q\n", e.Kind, e.Index, name)
 		}
 	}
 	if sec := m.Start; sec != nil {
-		fmt.Printf("%v:\n", sec.ID)
-		fmt.Printf(" - start function: %d\n", sec.Index)
+		fmt.Fprintf(w, "%v:\n", sec.ID)
+		fmt.Fprintf(w, " - start function: %d\n", sec.Index)
 	}
 	if sec := m.Elements; sec != nil {
-		fmt.Printf("%v:\n", sec.ID)
+		fmt.Fprintf(w, "%v:\n", sec.ID)
 		for i, e := range sec.Entries {
-			fmt.Printf(" - segment[%d] table=%d\n", i, e.Index)
-			fmt.Printf(" - init: %#v\n", e.Offset)
+			fmt.Fprintf(w, " - segment[%d] table=%d\n", i, e.Index)
+			fmt.Fprintf(w, " - init: %#v\n", e.Offset)
 			for ii, elem := range e.Elems {
-				fmt.Printf("  - elem[%d] = func[%d]\n", ii, elem)
+				fmt.Fprintf(w, "  - elem[%d] = func[%d]\n", ii, elem)
 			}
 		}
 	}
 	if sec := m.Data; sec != nil {
-		fmt.Printf("%v:\n", sec.ID)
+		fmt.Fprintf(w, "%v:\n", sec.ID)
 		for i, e := range sec.Entries {
-			fmt.Printf(" - segment[%d] size=%d - init %#v\n", i, len(e.Data), e.Offset)
-			fmt.Printf("%s", hexDump(e.Data, 0))
+			fmt.Fprintf(w, " - segment[%d] size=%d - init %#v\n", i, len(e.Data), e.Offset)
+			fmt.Fprintf(w, "%s", hexDump(e.Data, 0))
 		}
 	}
 	for _, sec := range m.Other {
-		fmt.Printf("%v:\n", sec.ID)
-		fmt.Printf(" - name: %q\n", sec.Name)
+		fmt.Fprintf(w, "%v:\n", sec.ID)
+		fmt.Fprintf(w, " - name: %q\n", sec.Name)
 		raw := bytes.NewReader(sec.Bytes[6:])
 		for {
 			if raw.Len() == 0 {
@@ -392,7 +393,7 @@ func printDetails(fname string, m *wasm.Module) {
 			if err != nil {
 				log.Fatal(err)
 			}
-			fmt.Printf(" - func[%d] %v\n", i, string(str))
+			fmt.Fprintf(w, " - func[%d] %v\n", i, string(str))
 		}
 	}
 }

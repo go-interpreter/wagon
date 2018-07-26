@@ -1,0 +1,41 @@
+../../exec/testdata/add-ex.wasm: module version: 0x1
+
+sections:
+
+     type start=0x0000000a end=0x00000011 (size=0x00000007) count: 1
+ function start=0x00000013 end=0x00000015 (size=0x00000002) count: 1
+   export start=0x00000017 end=0x0000001f (size=0x00000008) count: 1
+     code start=0x00000021 end=0x0000002a (size=0x00000009) count: 1
+../../exec/testdata/add-ex.wasm: module version: 0x1
+
+contents of section type:
+0000000a  01 60 02 7f 7f 01 7f                              |.`.....|
+
+contents of section function:
+00000013  01 00                                             |..|
+
+contents of section export:
+00000017  01 04 69 61 64 64 00 00                           |..iadd..|
+
+contents of section code:
+00000021  01 07 00 20 00 20 01 6a  0b                       |... . .j.|
+
+../../exec/testdata/add-ex.wasm: module version: 0x1
+
+code disassembly:
+
+func[0]: <func [i32 i32] -> [i32]>
+ 000000: 20 00 00 00 00             | get_local 0
+ 000006: 20 01 00 00 00             | get_local 1
+ 00000c: 6a                         | i32.add
+ 00000e: 0b                         | end
+../../exec/testdata/add-ex.wasm: module version: 0x1
+
+section details:
+
+type:
+ - type[0] <func [i32 i32] -> [i32]>
+function:
+ - func[0] sig=0
+export:
+ - function[0] -> "iadd"

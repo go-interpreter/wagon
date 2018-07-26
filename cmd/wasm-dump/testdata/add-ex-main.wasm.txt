@@ -1,0 +1,65 @@
+../../exec/testdata/add-ex-main.wasm: module version: 0x1
+
+sections:
+
+     type start=0x0000000a end=0x0000001e (size=0x00000014) count: 4
+   import start=0x00000020 end=0x00000037 (size=0x00000017) count: 2
+ function start=0x00000039 end=0x0000003d (size=0x00000004) count: 3
+     code start=0x0000003f end=0x0000005f (size=0x00000020) count: 3
+../../exec/testdata/add-ex-main.wasm: module version: 0x1
+
+contents of section type:
+0000000a  04 60 02 7f 7f 01 7f 60  01 7f 00 60 00 01 7f 60  |.`.....`...`...`|
+0000001a  02 7f 7f 00                                       |....|
+
+contents of section import:
+00000020  02 03 61 64 64 04 69 61  64 64 00 00 02 67 6f 05  |..add.iadd...go.|
+00000030  70 72 69 6e 74 00 01                              |print..|
+
+contents of section function:
+00000039  03 02 00 03                                       |....|
+
+contents of section code:
+0000003f  03 09 00 41 02 41 28 10  00 0f 0b 09 00 20 00 20  |...A.A(...... . |
+0000004f  01 10 00 0f 0b 0a 00 20  00 20 01 10 00 10 01 0b  |....... . ......|
+
+../../exec/testdata/add-ex-main.wasm: module version: 0x1
+
+code disassembly:
+
+func[0]: <func [] -> [i32]>
+ 000000: 41 02 00 00 00             | i32.const 2
+ 000006: 41 28 00 00 00             | i32.const 40
+ 00000c: 10 00 00 00 00             | call 0
+ 000012: 0f                         | return
+ 000014: 0b                         | end
+
+func[1]: <func [i32 i32] -> [i32]>
+ 000000: 20 00 00 00 00             | get_local 0
+ 000006: 20 01 00 00 00             | get_local 1
+ 00000c: 10 00 00 00 00             | call 0
+ 000012: 0f                         | return
+ 000014: 0b                         | end
+
+func[2]: <func [i32 i32] -> []>
+ 000000: 20 00 00 00 00             | get_local 0
+ 000006: 20 01 00 00 00             | get_local 1
+ 00000c: 10 00 00 00 00             | call 0
+ 000012: 10 01 00 00 00             | call 1
+ 000018: 0b                         | end
+../../exec/testdata/add-ex-main.wasm: module version: 0x1
+
+section details:
+
+type:
+ - type[0] <func [i32 i32] -> [i32]>
+ - type[1] <func [i32] -> []>
+ - type[2] <func [] -> [i32]>
+ - type[3] <func [i32 i32] -> []>
+import:
+ - function[0] sig=0 <- add.iadd
+ - function[1] sig=1 <- go.print
+function:
+ - func[0] sig=2
+ - func[1] sig=0
+ - func[2] sig=3

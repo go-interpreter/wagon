@@ -1,0 +1,40 @@
+../../exec/testdata/basic.wasm: module version: 0x1
+
+sections:
+
+     type start=0x0000000a end=0x0000000f (size=0x00000005) count: 1
+ function start=0x00000011 end=0x00000013 (size=0x00000002) count: 1
+   export start=0x00000015 end=0x0000001d (size=0x00000008) count: 1
+     code start=0x0000001f end=0x00000026 (size=0x00000007) count: 1
+../../exec/testdata/basic.wasm: module version: 0x1
+
+contents of section type:
+0000000a  01 60 00 01 7f                                    |.`...|
+
+contents of section function:
+00000011  01 00                                             |..|
+
+contents of section export:
+00000015  01 04 6d 61 69 6e 00 00                           |..main..|
+
+contents of section code:
+0000001f  01 05 00 41 2a 0f 0b                              |...A*..|
+
+../../exec/testdata/basic.wasm: module version: 0x1
+
+code disassembly:
+
+func[0]: <func [] -> [i32]>
+ 000000: 41 2a 00 00 00             | i32.const 42
+ 000006: 0f                         | return
+ 000008: 0b                         | end
+../../exec/testdata/basic.wasm: module version: 0x1
+
+section details:
+
+type:
+ - type[0] <func [] -> [i32]>
+function:
+ - func[0] sig=0
+export:
+ - function[0] -> "main"
