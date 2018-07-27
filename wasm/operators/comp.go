@@ -19,7 +19,7 @@ var (
 	I32LeS = newOp(0x4c, "i32.le_s", []wasm.ValueType{wasm.ValueTypeI32, wasm.ValueTypeI32}, wasm.ValueTypeI32)
 	I32LeU = newOp(0x4d, "i32.le_u", []wasm.ValueType{wasm.ValueTypeI32, wasm.ValueTypeI32}, wasm.ValueTypeI32)
 	I32GeS = newOp(0x4e, "i32.ge_s", []wasm.ValueType{wasm.ValueTypeI32, wasm.ValueTypeI32}, wasm.ValueTypeI32)
-	I32GeU = newOp(0x4f, "i32.ge_s", []wasm.ValueType{wasm.ValueTypeI32, wasm.ValueTypeI32}, wasm.ValueTypeI32)
+	I32GeU = newOp(0x4f, "i32.ge_u", []wasm.ValueType{wasm.ValueTypeI32, wasm.ValueTypeI32}, wasm.ValueTypeI32)
 	I64Eqz = newOp(0x50, "i64.eqz", []wasm.ValueType{wasm.ValueTypeI64}, wasm.ValueTypeI32)
 	I64Eq  = newOp(0x51, "i64.eq", []wasm.ValueType{wasm.ValueTypeI64, wasm.ValueTypeI64}, wasm.ValueTypeI32)
 	I64Ne  = newOp(0x52, "i64.ne", []wasm.ValueType{wasm.ValueTypeI64, wasm.ValueTypeI64}, wasm.ValueTypeI32)
