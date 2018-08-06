@@ -1,4 +1,4 @@
-// Copyright 2017 The go-interpreter Authors.  All rights reserved.
+// Copyright 2018 The go-interpreter Authors.  All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -7,19 +7,14 @@ package wasm_test
 import (
 	"bytes"
 	"io/ioutil"
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/go-interpreter/wagon/wasm"
 )
 
-var testPaths = []string{
-	"testdata",
-	"../exec/testdata",
-	"../exec/testdata/spec",
-}
-
-func TestReadModule(t *testing.T) {
+func TestEncode(t *testing.T) {
 	for _, dir := range testPaths {
 		fnames, err := filepath.Glob(filepath.Join(dir, "*.wasm"))
 		if err != nil {
@@ -34,12 +29,20 @@ func TestReadModule(t *testing.T) {
 				}
 
 				r := bytes.NewReader(raw)
-				m, err := wasm.ReadModule(r, nil)
+				m, err := wasm.DecodeModule(r)
 				if err != nil {
 					t.Fatalf("error reading module %v", err)
 				}
-				if m == nil {
-					t.Fatalf("error reading module: (nil *Module)")
+				buf := new(bytes.Buffer)
+				err = wasm.EncodeModule(buf, m)
+				if err != nil {
+					t.Fatalf("error writing module %v", err)
+				}
+				if !bytes.Equal(buf.Bytes(), raw) {
+					ioutil.WriteFile(name+"_got", buf.Bytes(), 0644)
+					t.Fatal("modules are different")
+				} else {
+					os.Remove(name + "_got")
 				}
 			})
 		}

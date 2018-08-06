@@ -120,8 +120,7 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 			return nil, err
 		}
 		instr := Instr{
-			Op:         opStr,
-			Immediates: [](interface{}){},
+			Op: opStr,
 		}
 		if op == ops.End || op == ops.Else {
 			// There are two possible cases here:
@@ -413,22 +412,18 @@ func Disassemble(fn wasm.Function, module *wasm.Module) (*Disassembly, error) {
 			}
 			instr.Immediates = append(instr.Immediates, i)
 		case ops.F32Const:
-			var i uint32
-			// TODO(vibhavp): Switch to a reflect-free method in the future
-			// for reading off the bytestream.
-			err := binary.Read(reader, binary.LittleEndian, &i)
-			if err != nil {
+			var b [4]byte
+			if _, err := io.ReadFull(reader, b[:]); err != nil {
 				return nil, err
 			}
+			i := binary.LittleEndian.Uint32(b[:])
 			instr.Immediates = append(instr.Immediates, math.Float32frombits(i))
 		case ops.F64Const:
-			var i uint64
-			// TODO(vibhavp): Switch to a reflect-free method in the future
-			// for reading off the bytestream.
-			err := binary.Read(reader, binary.LittleEndian, &i)
-			if err != nil {
+			var b [8]byte
+			if _, err := io.ReadFull(reader, b[:]); err != nil {
 				return nil, err
 			}
+			i := binary.LittleEndian.Uint64(b[:])
 			instr.Immediates = append(instr.Immediates, math.Float64frombits(i))
 		case ops.I32Load, ops.I64Load, ops.F32Load, ops.F64Load, ops.I32Load8s, ops.I32Load8u, ops.I32Load16s, ops.I32Load16u, ops.I64Load8s, ops.I64Load8u, ops.I64Load16s, ops.I64Load16u, ops.I64Load32s, ops.I64Load32u, ops.I32Store, ops.I64Store, ops.F32Store, ops.F64Store, ops.I32Store8, ops.I32Store16, ops.I64Store8, ops.I64Store16, ops.I64Store32:
 			// read memory_immediate

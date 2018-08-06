@@ -58,7 +58,7 @@ type Module struct {
 	TableIndexSpace        [][]uint32
 	LinearMemoryIndexSpace [][]byte
 
-	Other []Section // Other holds the custom sections if any
+	Other []RawSection // Other holds the custom sections if any
 
 	imports struct {
 		Funcs    []uint32
@@ -87,9 +87,9 @@ func NewModule() *Module {
 // returns a valid resolved module.
 type ResolveFunc func(name string) (*Module, error)
 
-// ReadModule reads a module from the reader r. resolvePath must take a string
-// and a return a reader to the module pointed to by the string.
-func ReadModule(r io.Reader, resolvePath ResolveFunc) (*Module, error) {
+// DecodeModule is the same as ReadModule, but it only decodes the module without
+// initializing the index space or resolving imports.
+func DecodeModule(r io.Reader) (*Module, error) {
 	reader := &readpos.ReadPos{
 		R:      r,
 		CurPos: 0,
@@ -111,8 +111,17 @@ func ReadModule(r io.Reader, resolvePath ResolveFunc) (*Module, error) {
 		if err != nil {
 			return nil, err
 		} else if done {
-			break
+			return m, nil
 		}
+	}
+}
+
+// ReadModule reads a module from the reader r. resolvePath must take a string
+// and a return a reader to the module pointed to by the string.
+func ReadModule(r io.Reader, resolvePath ResolveFunc) (*Module, error) {
+	m, err := DecodeModule(r)
+	if err != nil {
+		return nil, err
 	}
 
 	m.LinearMemoryIndexSpace = make([][]byte, 1)

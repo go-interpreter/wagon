@@ -1,8 +1,8 @@
-// Copyright 2017 The go-interpreter Authors.  All rights reserved.
+// Copyright 2018 The go-interpreter Authors.  All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package wasm_test
+package disasm_test
 
 import (
 	"bytes"
@@ -10,16 +10,17 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/go-interpreter/wagon/disasm"
 	"github.com/go-interpreter/wagon/wasm"
 )
 
 var testPaths = []string{
-	"testdata",
+	"../wasm/testdata",
 	"../exec/testdata",
 	"../exec/testdata/spec",
 }
 
-func TestReadModule(t *testing.T) {
+func TestAssemble(t *testing.T) {
 	for _, dir := range testPaths {
 		fnames, err := filepath.Glob(filepath.Join(dir, "*.wasm"))
 		if err != nil {
@@ -38,8 +39,18 @@ func TestReadModule(t *testing.T) {
 				if err != nil {
 					t.Fatalf("error reading module %v", err)
 				}
-				if m == nil {
-					t.Fatalf("error reading module: (nil *Module)")
+				for _, f := range m.FunctionIndexSpace {
+					d, err := disasm.Disassemble(f, m)
+					if err != nil {
+						t.Fatalf("disassemble failed: %v", err)
+					}
+					code, err := disasm.Assemble(d.Code)
+					if err != nil {
+						t.Fatalf("assemble failed: %v", err)
+					}
+					if !bytes.Equal(f.Body.Code, code) {
+						t.Fatal("code is different")
+					}
 				}
 			})
 		}
