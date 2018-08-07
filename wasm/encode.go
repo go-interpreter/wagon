@@ -22,43 +22,7 @@ func EncodeModule(w io.Writer, m *Module) error {
 	if err := writeU32(w, currentVersion); err != nil {
 		return err
 	}
-	var sections []Section
-	if m.Types != nil {
-		sections = append(sections, m.Types)
-	}
-	if m.Import != nil {
-		sections = append(sections, m.Import)
-	}
-	if m.Function != nil {
-		sections = append(sections, m.Function)
-	}
-	if m.Table != nil {
-		sections = append(sections, m.Table)
-	}
-	if m.Memory != nil {
-		sections = append(sections, m.Memory)
-	}
-	if m.Global != nil {
-		sections = append(sections, m.Global)
-	}
-	if m.Export != nil {
-		sections = append(sections, m.Export)
-	}
-	if m.Start != nil {
-		sections = append(sections, m.Start)
-	}
-	if m.Elements != nil {
-		sections = append(sections, m.Elements)
-	}
-	if m.Code != nil {
-		sections = append(sections, m.Code)
-	}
-	if m.Data != nil {
-		sections = append(sections, m.Data)
-	}
-	for i := range m.Other {
-		sections = append(sections, &m.Other[i])
-	}
+	sections := m.GetSections()
 	buf := new(bytes.Buffer)
 	for _, s := range sections {
 		if _, err := leb128.WriteVarUint32(w, uint32(s.SectionID())); err != nil {

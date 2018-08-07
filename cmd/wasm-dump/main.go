@@ -109,49 +109,49 @@ func printHeaders(w io.Writer, fname string, m *wasm.Module) {
 	if sec := m.Types; sec != nil {
 		fmt.Fprintf(w, hdrfmt,
 			sec.ID.String(),
-			sec.RawSection.Start, sec.RawSection.End, sec.RawSection.PayloadLen,
+			sec.RawSection.Start, sec.RawSection.End, len(sec.RawSection.Bytes),
 			len(sec.Entries),
 		)
 	}
 	if sec := m.Import; sec != nil {
 		fmt.Fprintf(w, hdrfmt,
 			sec.ID.String(),
-			sec.RawSection.Start, sec.RawSection.End, sec.RawSection.PayloadLen,
+			sec.RawSection.Start, sec.RawSection.End, len(sec.RawSection.Bytes),
 			len(sec.Entries),
 		)
 	}
 	if sec := m.Function; sec != nil {
 		fmt.Fprintf(w, hdrfmt,
 			sec.ID.String(),
-			sec.RawSection.Start, sec.RawSection.End, sec.RawSection.PayloadLen,
+			sec.RawSection.Start, sec.RawSection.End, len(sec.RawSection.Bytes),
 			len(sec.Types),
 		)
 	}
 	if sec := m.Table; sec != nil {
 		fmt.Fprintf(w, hdrfmt,
 			sec.ID.String(),
-			sec.RawSection.Start, sec.RawSection.End, sec.RawSection.PayloadLen,
+			sec.RawSection.Start, sec.RawSection.End, len(sec.RawSection.Bytes),
 			len(sec.Entries),
 		)
 	}
 	if sec := m.Memory; sec != nil {
 		fmt.Fprintf(w, hdrfmt,
 			sec.ID.String(),
-			sec.RawSection.Start, sec.RawSection.End, sec.RawSection.PayloadLen,
+			sec.RawSection.Start, sec.RawSection.End, len(sec.RawSection.Bytes),
 			len(sec.Entries),
 		)
 	}
 	if sec := m.Global; sec != nil {
 		fmt.Fprintf(w, hdrfmt,
 			sec.ID.String(),
-			sec.RawSection.Start, sec.RawSection.End, sec.RawSection.PayloadLen,
+			sec.RawSection.Start, sec.RawSection.End, len(sec.RawSection.Bytes),
 			len(sec.Globals),
 		)
 	}
 	if sec := m.Export; sec != nil {
 		fmt.Fprintf(w, hdrfmt,
 			sec.ID.String(),
-			sec.RawSection.Start, sec.RawSection.End, sec.RawSection.PayloadLen,
+			sec.RawSection.Start, sec.RawSection.End, len(sec.RawSection.Bytes),
 			len(sec.Entries),
 		)
 	}
@@ -159,35 +159,35 @@ func printHeaders(w io.Writer, fname string, m *wasm.Module) {
 		hdrfmt := "%9s start=0x%08x end=0x%08x (size=0x%08x) start: %d\n"
 		fmt.Fprintf(w, hdrfmt,
 			sec.ID.String(),
-			sec.RawSection.Start, sec.RawSection.End, sec.RawSection.PayloadLen,
+			sec.RawSection.Start, sec.RawSection.End, len(sec.RawSection.Bytes),
 			sec.Index,
 		)
 	}
 	if sec := m.Elements; sec != nil {
 		fmt.Fprintf(w, hdrfmt,
 			sec.ID.String(),
-			sec.RawSection.Start, sec.RawSection.End, sec.RawSection.PayloadLen,
+			sec.RawSection.Start, sec.RawSection.End, len(sec.RawSection.Bytes),
 			len(sec.Entries),
 		)
 	}
 	if sec := m.Code; sec != nil {
 		fmt.Fprintf(w, hdrfmt,
 			sec.ID.String(),
-			sec.RawSection.Start, sec.RawSection.End, sec.RawSection.PayloadLen,
+			sec.RawSection.Start, sec.RawSection.End, len(sec.RawSection.Bytes),
 			len(sec.Bodies),
 		)
 	}
 	if sec := m.Data; sec != nil {
 		fmt.Fprintf(w, hdrfmt,
 			sec.ID.String(),
-			sec.RawSection.Start, sec.RawSection.End, sec.RawSection.PayloadLen,
+			sec.RawSection.Start, sec.RawSection.End, len(sec.RawSection.Bytes),
 			len(sec.Entries),
 		)
 	}
 	for _, sec := range m.Other {
 		fmt.Fprintf(w, "%9s start=0x%08x end=0x%08x (size=0x%08x) %q\n",
 			sec.ID.String(),
-			sec.Start, sec.End, sec.PayloadLen,
+			sec.Start, sec.End, len(sec.Bytes),
 			sec.Name,
 		)
 	}
@@ -197,48 +197,12 @@ func printFull(w io.Writer, fname string, m *wasm.Module) {
 	fmt.Fprintf(w, "%s: module version: %#x\n\n", fname, m.Version)
 
 	hdrfmt := "contents of section %s:\n"
-	var sections []*wasm.RawSection
-
-	if sec := m.Types; sec != nil {
-		sections = append(sections, &sec.RawSection)
-	}
-	if sec := m.Import; sec != nil {
-		sections = append(sections, &sec.RawSection)
-	}
-	if sec := m.Function; sec != nil {
-		sections = append(sections, &sec.RawSection)
-	}
-	if sec := m.Table; sec != nil {
-		sections = append(sections, &sec.RawSection)
-	}
-	if sec := m.Memory; sec != nil {
-		sections = append(sections, &sec.RawSection)
-	}
-	if sec := m.Global; sec != nil {
-		sections = append(sections, &sec.RawSection)
-	}
-	if sec := m.Export; sec != nil {
-		sections = append(sections, &sec.RawSection)
-	}
-	if sec := m.Start; sec != nil {
-		sections = append(sections, &sec.RawSection)
-	}
-	if sec := m.Elements; sec != nil {
-		sections = append(sections, &sec.RawSection)
-	}
-	if sec := m.Code; sec != nil {
-		sections = append(sections, &sec.RawSection)
-	}
-	if sec := m.Data; sec != nil {
-		sections = append(sections, &sec.RawSection)
-	}
-	for i := range m.Other {
-		sections = append(sections, &m.Other[i])
-	}
+	sections := m.GetSections()
 
 	for _, sec := range sections {
-		fmt.Fprintf(w, hdrfmt, sec.ID.String())
-		fmt.Fprintln(w, hexDump(sec.Bytes, uint(sec.Start)))
+		rs := sec.GetRawSection()
+		fmt.Fprintf(w, hdrfmt, rs.ID.String())
+		fmt.Fprintln(w, hexDump(rs.Bytes, uint(rs.Start)))
 	}
 }
 

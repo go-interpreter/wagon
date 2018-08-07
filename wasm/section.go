@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"sort"
 
 	"github.com/go-interpreter/wagon/wasm/internal/readpos"
@@ -72,27 +73,12 @@ type RawSection struct {
 	Start int64
 	End   int64
 
-	ID SectionID
-	// Size of this section in bytes
-	PayloadLen uint32
-	// Section name, empty if id != 0
-	Name  string
+	ID    SectionID
 	Bytes []byte
 }
 
 func (s *RawSection) SectionID() SectionID {
 	return s.ID
-}
-
-func (s *RawSection) ReadPayload(r io.Reader) error {
-	s.Bytes = make([]byte, s.PayloadLen)
-	_, err := io.ReadFull(r, s.Bytes)
-	return err
-}
-
-func (s *RawSection) WritePayload(w io.Writer) error {
-	_, err := w.Write(s.Bytes)
-	return err
 }
 
 func (s *RawSection) GetRawSection() *RawSection {
@@ -126,32 +112,19 @@ func (m *Module) readSection(r *readpos.ReadPos) (bool, error) {
 	var id uint32
 
 	logger.Println("Reading section ID")
-	if id, err = leb128.ReadVarUint32(r); err != nil {
-		if err == io.EOF { // no bytes were read, the reader is empty
-			return true, nil
-		}
+	id, err = leb128.ReadVarUint32(r)
+	if err == io.EOF {
+		return true, nil
+	} else if err != nil {
 		return false, err
 	}
 	s := RawSection{ID: SectionID(id)}
 
 	logger.Println("Reading payload length")
-	if s.PayloadLen, err = leb128.ReadVarUint32(r); err != nil {
-		return false, nil
-	}
 
-	payloadDataLen := s.PayloadLen
-
-	if s.ID == SectionIDCustom {
-		nameLen, nameLenSize, err := leb128.ReadVarUint32Size(r)
-		if err != nil {
-			return false, err
-		}
-		payloadDataLen -= uint32(nameLenSize)
-		if s.Name, err = readString(r, int(nameLen)); err != nil {
-			return false, err
-		}
-
-		payloadDataLen -= uint32(len(s.Name))
+	payloadDataLen, err := leb128.ReadVarUint32(r)
+	if err != nil {
+		return false, err
 	}
 
 	logger.Printf("Section payload length: %d", payloadDataLen)
@@ -166,9 +139,9 @@ func (m *Module) readSection(r *readpos.ReadPos) (bool, error) {
 	switch s.ID {
 	case SectionIDCustom:
 		logger.Println("section custom")
-		i := len(m.Other)
-		m.Other = append(m.Other, s)
-		sec = &m.Other[i]
+		cs := &SectionCustom{}
+		m.Other = append(m.Other, cs)
+		sec = cs
 	case SectionIDType:
 		logger.Println("section type")
 		m.Types = &SectionTypes{}
@@ -241,6 +214,42 @@ func (m *Module) readSection(r *readpos.ReadPos) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+var _ Section = (*SectionCustom)(nil)
+
+type SectionCustom struct {
+	RawSection
+	Name string
+	Data []byte
+}
+
+func (s *SectionCustom) SectionID() SectionID {
+	return SectionIDCustom
+}
+
+func (s *SectionCustom) ReadPayload(r io.Reader) error {
+	nameLen, err := leb128.ReadVarUint32(r)
+	if err != nil {
+		return err
+	}
+	if s.Name, err = readString(r, int(nameLen)); err != nil {
+		return err
+	}
+	data, err := ioutil.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	s.Data = data
+	return nil
+}
+
+func (s *SectionCustom) WritePayload(w io.Writer) error {
+	if err := writeStringUint(w, s.Name); err != nil {
+		return err
+	}
+	_, err := w.Write(s.Data)
+	return err
 }
 
 var _ Section = (*SectionTypes)(nil)

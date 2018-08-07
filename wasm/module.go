@@ -48,6 +48,7 @@ type Module struct {
 	Elements *SectionElements
 	Code     *SectionCode
 	Data     *SectionData
+	Other    []*SectionCustom
 
 	// The function index space of the module
 	FunctionIndexSpace []Function
@@ -58,14 +59,53 @@ type Module struct {
 	TableIndexSpace        [][]uint32
 	LinearMemoryIndexSpace [][]byte
 
-	Other []RawSection // Other holds the custom sections if any
-
 	imports struct {
 		Funcs    []uint32
 		Globals  int
 		Tables   int
 		Memories int
 	}
+}
+
+func (m *Module) GetSections() []Section {
+	var sections []Section
+	if m.Types != nil {
+		sections = append(sections, m.Types)
+	}
+	if m.Import != nil {
+		sections = append(sections, m.Import)
+	}
+	if m.Function != nil {
+		sections = append(sections, m.Function)
+	}
+	if m.Table != nil {
+		sections = append(sections, m.Table)
+	}
+	if m.Memory != nil {
+		sections = append(sections, m.Memory)
+	}
+	if m.Global != nil {
+		sections = append(sections, m.Global)
+	}
+	if m.Export != nil {
+		sections = append(sections, m.Export)
+	}
+	if m.Start != nil {
+		sections = append(sections, m.Start)
+	}
+	if m.Elements != nil {
+		sections = append(sections, m.Elements)
+	}
+	if m.Code != nil {
+		sections = append(sections, m.Code)
+	}
+	if m.Data != nil {
+		sections = append(sections, m.Data)
+	}
+	for _, s := range m.Other {
+		sections = append(sections, s)
+	}
+	return sections
 }
 
 // NewModule creates a new empty module
