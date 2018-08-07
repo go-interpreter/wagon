@@ -230,11 +230,9 @@ func (s *SectionCustom) SectionID() SectionID {
 }
 
 func (s *SectionCustom) ReadPayload(r io.Reader) error {
-	nameLen, err := leb128.ReadVarUint32(r)
+	var err error
+	s.Name, err = readStringUint(r)
 	if err != nil {
-		return err
-	}
-	if s.Name, err = readString(r, int(nameLen)); err != nil {
 		return err
 	}
 	data, err := ioutil.ReadAll(r)
@@ -334,21 +332,13 @@ func (s *SectionImports) WritePayload(w io.Writer) error {
 }
 
 func (i *ImportEntry) UnmarshalWASM(r io.Reader) error {
-	modLen, err := leb128.ReadVarUint32(r)
+	var err error
+	i.ModuleName, err = readStringUint(r)
 	if err != nil {
 		return err
 	}
-
-	if i.ModuleName, err = readString(r, int(modLen)); err != nil {
-		return err
-	}
-
-	fieldLen, err := leb128.ReadVarUint32(r)
+	i.FieldName, err = readStringUint(r)
 	if err != nil {
-		return err
-	}
-
-	if i.FieldName, err = readString(r, int(fieldLen)); err != nil {
 		return err
 	}
 	var kind External
@@ -647,12 +637,9 @@ type ExportEntry struct {
 }
 
 func (e *ExportEntry) UnmarshalWASM(r io.Reader) error {
-	fieldLen, err := leb128.ReadVarUint32(r)
+	var err error
+	e.FieldStr, err = readStringUint(r)
 	if err != nil {
-		return err
-	}
-
-	if e.FieldStr, err = readString(r, int(fieldLen)); err != nil {
 		return err
 	}
 
@@ -977,13 +964,7 @@ func (s *DataSegment) UnmarshalWASM(r io.Reader) error {
 	if s.Offset, err = readInitExpr(r); err != nil {
 		return err
 	}
-
-	size, err := leb128.ReadVarUint32(r)
-	if err != nil {
-		return err
-	}
-	s.Data, err = readBytes(r, int(size))
-
+	s.Data, err = readBytesUint(r)
 	return err
 }
 
