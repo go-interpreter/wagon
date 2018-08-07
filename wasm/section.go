@@ -140,7 +140,7 @@ func (m *Module) readSection(r *readpos.ReadPos) (bool, error) {
 	case SectionIDCustom:
 		logger.Println("section custom")
 		cs := &SectionCustom{}
-		m.Other = append(m.Other, cs)
+		m.Customs = append(m.Customs, cs)
 		sec = cs
 	case SectionIDType:
 		logger.Println("section type")

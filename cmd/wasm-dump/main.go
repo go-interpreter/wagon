@@ -184,7 +184,7 @@ func printHeaders(w io.Writer, fname string, m *wasm.Module) {
 			len(sec.Entries),
 		)
 	}
-	for _, sec := range m.Other {
+	for _, sec := range m.Customs {
 		fmt.Fprintf(w, "%9s start=0x%08x end=0x%08x (size=0x%08x) %q\n",
 			sec.ID.String(),
 			sec.Start, sec.End, len(sec.Bytes),
@@ -336,7 +336,7 @@ func printDetails(w io.Writer, fname string, m *wasm.Module) {
 			fmt.Fprintf(w, "%s", hexDump(e.Data, 0))
 		}
 	}
-	for _, sec := range m.Other {
+	for _, sec := range m.Customs {
 		fmt.Fprintf(w, "%v:\n", sec.ID)
 		fmt.Fprintf(w, " - name: %q\n", sec.Name)
 		raw := bytes.NewReader(sec.Bytes[6:])

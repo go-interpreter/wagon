@@ -49,7 +49,7 @@ type Module struct {
 	Elements *SectionElements
 	Code     *SectionCode
 	Data     *SectionData
-	Other    []*SectionCustom
+	Customs  []*SectionCustom
 
 	// The function index space of the module
 	FunctionIndexSpace []Function
@@ -68,8 +68,14 @@ type Module struct {
 	}
 }
 
-func (m *Module) GetSections() []Section {
-	return m.Sections
+// Custom returns a custom section with a specific name, if it exists.
+func (m *Module) Custom(name string) *SectionCustom {
+	for _, s := range m.Customs {
+		if s.Name == name {
+			return s
+		}
+	}
+	return nil
 }
 
 // NewModule creates a new empty module
