@@ -106,7 +106,7 @@ func (m *Module) populateTables() error {
 		}
 		offset, ok := val.(int32)
 		if !ok {
-			return InvalidValueTypeInitExprError{reflect.Int32, reflect.TypeOf(offset).Kind()}
+			return InvalidValueTypeInitExprError{reflect.Int32, reflect.TypeOf(val).Kind()}
 		}
 
 		table := m.TableIndexSpace[int(elem.Index)]
@@ -152,7 +152,7 @@ func (m *Module) populateLinearMemory() error {
 		}
 		offset, ok := val.(int32)
 		if !ok {
-			return InvalidValueTypeInitExprError{reflect.Int32, reflect.TypeOf(offset).Kind()}
+			return InvalidValueTypeInitExprError{reflect.Int32, reflect.TypeOf(val).Kind()}
 		}
 
 		memory := m.LinearMemoryIndexSpace[int(entry.Index)]
