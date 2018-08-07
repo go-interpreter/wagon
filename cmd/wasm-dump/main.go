@@ -197,7 +197,7 @@ func printFull(w io.Writer, fname string, m *wasm.Module) {
 	fmt.Fprintf(w, "%s: module version: %#x\n\n", fname, m.Version)
 
 	hdrfmt := "contents of section %s:\n"
-	sections := m.GetSections()
+	sections := m.Sections
 
 	for _, sec := range sections {
 		rs := sec.GetRawSection()

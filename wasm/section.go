@@ -213,6 +213,7 @@ func (m *Module) readSection(r *readpos.ReadPos) (bool, error) {
 			s.Bodies[i].Module = m
 		}
 	}
+	m.Sections = append(m.Sections, sec)
 	return false, nil
 }
 

@@ -22,7 +22,7 @@ func EncodeModule(w io.Writer, m *Module) error {
 	if err := writeU32(w, currentVersion); err != nil {
 		return err
 	}
-	sections := m.GetSections()
+	sections := m.Sections
 	buf := new(bytes.Buffer)
 	for _, s := range sections {
 		if _, err := leb128.WriteVarUint32(w, uint32(s.SectionID())); err != nil {

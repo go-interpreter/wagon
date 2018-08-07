@@ -35,7 +35,8 @@ func (fct *Function) IsHost() bool {
 // Module represents a parsed WebAssembly module:
 // http://webassembly.org/docs/modules/
 type Module struct {
-	Version uint32
+	Version  uint32
+	Sections []Section
 
 	Types    *SectionTypes
 	Import   *SectionImports
@@ -68,44 +69,7 @@ type Module struct {
 }
 
 func (m *Module) GetSections() []Section {
-	var sections []Section
-	if m.Types != nil {
-		sections = append(sections, m.Types)
-	}
-	if m.Import != nil {
-		sections = append(sections, m.Import)
-	}
-	if m.Function != nil {
-		sections = append(sections, m.Function)
-	}
-	if m.Table != nil {
-		sections = append(sections, m.Table)
-	}
-	if m.Memory != nil {
-		sections = append(sections, m.Memory)
-	}
-	if m.Global != nil {
-		sections = append(sections, m.Global)
-	}
-	if m.Export != nil {
-		sections = append(sections, m.Export)
-	}
-	if m.Start != nil {
-		sections = append(sections, m.Start)
-	}
-	if m.Elements != nil {
-		sections = append(sections, m.Elements)
-	}
-	if m.Code != nil {
-		sections = append(sections, m.Code)
-	}
-	if m.Data != nil {
-		sections = append(sections, m.Data)
-	}
-	for _, s := range m.Other {
-		sections = append(sections, s)
-	}
-	return sections
+	return m.Sections
 }
 
 // NewModule creates a new empty module
