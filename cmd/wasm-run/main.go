@@ -27,7 +27,6 @@ func main() {
 
 	if flag.NArg() < 1 {
 		flag.Usage()
-		flag.PrintDefaults()
 		os.Exit(1)
 	}
 
