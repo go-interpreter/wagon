@@ -34,6 +34,6 @@ var (
 	I64Store16 = newOp(0x3d, "i64.store16", []wasm.ValueType{wasm.ValueTypeI64, wasm.ValueTypeI32}, noReturn)
 	I64Store32 = newOp(0x3e, "i64.store32", []wasm.ValueType{wasm.ValueTypeI64, wasm.ValueTypeI32}, noReturn)
 
-	CurrentMemory = newOp(0x3f, "current_memory", nil, wasm.ValueTypeI32)
-	GrowMemory    = newOp(0x40, "grow_memory", []wasm.ValueType{wasm.ValueTypeI32}, wasm.ValueTypeI32)
+	CurrentMemory = newOp(0x3f, "memory.size", nil, wasm.ValueTypeI32)
+	GrowMemory    = newOp(0x40, "memory.grow", []wasm.ValueType{wasm.ValueTypeI32}, wasm.ValueTypeI32)
 )
