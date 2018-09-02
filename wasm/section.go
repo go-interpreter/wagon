@@ -577,6 +577,7 @@ func (g *GlobalEntry) MarshalWASM(w io.Writer) error {
 type SectionExports struct {
 	RawSection
 	Entries map[string]ExportEntry
+	Names   []string
 }
 
 func (*SectionExports) SectionID() SectionID {
@@ -600,6 +601,7 @@ func (s *SectionExports) ReadPayload(r io.Reader) error {
 			return DuplicateExportError(entry.FieldStr)
 		}
 		s.Entries[entry.FieldStr] = entry
+		s.Names = append(s.Names, entry.FieldStr)
 	}
 	return nil
 }
