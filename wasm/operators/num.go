@@ -35,7 +35,7 @@ var (
 	I64Mul      = newOp(0x7e, "i64.mul", []wasm.ValueType{wasm.ValueTypeI64, wasm.ValueTypeI64}, wasm.ValueTypeI64)
 	I64DivS     = newOp(0x7f, "i64.div_s", []wasm.ValueType{wasm.ValueTypeI64, wasm.ValueTypeI64}, wasm.ValueTypeI64)
 	I64DivU     = newOp(0x80, "i64.div_u", []wasm.ValueType{wasm.ValueTypeI64, wasm.ValueTypeI64}, wasm.ValueTypeI64)
-	I64RemS     = newOp(0x81, "i64.div_u", []wasm.ValueType{wasm.ValueTypeI64, wasm.ValueTypeI64}, wasm.ValueTypeI64)
+	I64RemS     = newOp(0x81, "i64.rem_s", []wasm.ValueType{wasm.ValueTypeI64, wasm.ValueTypeI64}, wasm.ValueTypeI64)
 	I64RemU     = newOp(0x82, "i64.rem_u", []wasm.ValueType{wasm.ValueTypeI64, wasm.ValueTypeI64}, wasm.ValueTypeI64)
 	I64And      = newOp(0x83, "i64.and", []wasm.ValueType{wasm.ValueTypeI64, wasm.ValueTypeI64}, wasm.ValueTypeI64)
 	I64Or       = newOp(0x84, "i64.or", []wasm.ValueType{wasm.ValueTypeI64, wasm.ValueTypeI64}, wasm.ValueTypeI64)
