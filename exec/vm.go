@@ -112,7 +112,7 @@ func NewVM(module *wasm.Module) (*VM, error) {
 			continue
 		}
 
-		disassembly, err := disasm.Disassemble(fn, module)
+		disassembly, err := disasm.NewDisassembly(fn, module)
 		if err != nil {
 			return nil, err
 		}

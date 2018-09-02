@@ -212,7 +212,7 @@ func printDis(w io.Writer, fname string, m *wasm.Module) {
 	for i := range m.Function.Types {
 		f := m.GetFunction(i)
 		fmt.Fprintf(w, "\nfunc[%d]: %v\n", i, f.Sig)
-		dis, err := disasm.Disassemble(*f, m)
+		dis, err := disasm.NewDisassembly(*f, m)
 		if err != nil {
 			log.Fatal(err)
 		}
