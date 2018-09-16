@@ -7,11 +7,10 @@ package wast_test
 import (
 	"bytes"
 	"io/ioutil"
-	"path/filepath"
-	"testing"
-
 	"os"
+	"path/filepath"
 	"strings"
+	"testing"
 
 	"github.com/go-interpreter/wagon/wasm"
 	"github.com/go-interpreter/wagon/wast"
