@@ -158,8 +158,8 @@ func (m *Module) populateLinearMemory() error {
 		memory := m.LinearMemoryIndexSpace[int(entry.Index)]
 		if int(offset)+len(entry.Data) > len(memory) {
 			data := make([]byte, int(offset)+len(entry.Data))
-			copy(data[offset:], entry.Data)
 			copy(data, memory)
+			copy(data[offset:], entry.Data)
 			m.LinearMemoryIndexSpace[int(entry.Index)] = data
 		} else {
 			copy(memory[int(offset):], entry.Data)
