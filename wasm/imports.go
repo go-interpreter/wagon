@@ -117,6 +117,14 @@ func (e InvalidFunctionIndexError) Error() string {
 	return fmt.Sprintf("wasm: Invalid index to function index space: %#x", uint32(e))
 }
 
+// InvalidImportError is returned when the export of a resolved module doesn't
+// match the signature of its import declaration.
+type InvalidImportError uint32
+
+func (e InvalidImportError) Error() string {
+	return fmt.Sprintf("wasm: invalid signature for import %#x", uint32(e))
+}
+
 func (module *Module) resolveImports(resolve ResolveFunc) error {
 	if module.Import == nil {
 		return nil
@@ -156,12 +164,26 @@ func (module *Module) resolveImports(resolve ResolveFunc) error {
 		}
 
 		index := exportEntry.Index
-
 		switch exportEntry.Kind {
 		case ExternalFunction:
 			fn := importedModule.GetFunction(int(index))
 			if fn == nil {
 				return InvalidFunctionIndexError(index)
+			}
+
+			importIndex := importEntry.Type.(FuncImport).Type
+			if len(fn.Sig.ReturnTypes) != len(module.Types.Entries[importIndex].ReturnTypes) || len(fn.Sig.ParamTypes) != len(module.Types.Entries[importIndex].ParamTypes) {
+				return InvalidImportError(importIndex)
+			}
+			for i, typ := range fn.Sig.ReturnTypes {
+				if typ != module.Types.Entries[importIndex].ReturnTypes[i] {
+					return InvalidImportError(importIndex)
+				}
+			}
+			for i, typ := range fn.Sig.ParamTypes {
+				if typ != module.Types.Entries[importIndex].ParamTypes[i] {
+					return InvalidImportError(importIndex)
+				}
 			}
 			module.FunctionIndexSpace = append(module.FunctionIndexSpace, *fn)
 			module.Code.Bodies = append(module.Code.Bodies, *fn.Body)
