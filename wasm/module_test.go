@@ -162,7 +162,7 @@ func TestModuleSignatureCheck(t *testing.T) {
 			if err == nil {
 				t.Fatalf("Expected an error while reading the module")
 			}
-			if got, want := err.Error(), "wasm: invalid signature for import 0x0"; got != want {
+			if got, want := err.Error(), "wasm: invalid signature for import 0x0 with name 'finish' in module ethereum"; got != want {
 				t.Fatalf("invalid error. got=%q, want=%q", got, want)
 			}
 		})
