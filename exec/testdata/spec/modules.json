@@ -3473,7 +3473,7 @@
   },
   {
     "file": "nop.wasm",
-    "test": [
+    "tests": [
       {
         "return": "i32:1",
         "args": [],
