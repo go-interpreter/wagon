@@ -214,7 +214,7 @@ func NewDisassembly(fn wasm.Function, module *wasm.Module) (*Disassembly, error)
 
 			stackDepths.Pop()
 			if op == ops.Else {
-				stackDepths.Push(0)
+				stackDepths.Push(stackDepths.Top())
 				blockIndices.Push(uint64(curIndex))
 				if !instr.Unreachable {
 					blockPolymorphicOps = append(blockPolymorphicOps, []int{})
