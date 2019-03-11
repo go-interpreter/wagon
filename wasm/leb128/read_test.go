@@ -7,6 +7,7 @@ package leb128
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"testing"
 )
 
@@ -33,6 +34,13 @@ func TestReadVarUint32(t *testing.T) {
 	}
 }
 
+func TestReadVarUint32Err(t *testing.T) {
+	_, err := ReadVarUint32(bytes.NewReader(nil))
+	if got, want := err, io.EOF; got != want {
+		t.Fatalf("got err=%v, want=%v", got, want)
+	}
+}
+
 var casesInt = []struct {
 	v int64
 	b []byte
@@ -53,5 +61,12 @@ func TestReadVarint32(t *testing.T) {
 				t.Fatalf("got = %d; want = %d", n, c.v)
 			}
 		})
+	}
+}
+
+func TestReadVarint32Err(t *testing.T) {
+	_, err := ReadVarint32(bytes.NewReader(nil))
+	if got, want := err, io.EOF; got != want {
+		t.Fatalf("got err=%v, want=%v", got, want)
 	}
 }
