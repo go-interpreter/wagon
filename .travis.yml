@@ -16,15 +16,15 @@ matrix:
  allow_failures:
    - go: master
  include:
-   - go: 1.9.x
+   - go: 1.12.x
+     env:
+       - COVERAGE="-cover -race"
+   - go: 1.11.x
      env:
        - COVERAGE=""
    - go: 1.10.x
      env:
        - COVERAGE=""
-   - go: 1.11.x
-     env:
-       - COVERAGE="-cover -race"
    - go: master
      env:
        - COVERAGE="-race"
