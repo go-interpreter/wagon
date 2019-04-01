@@ -4,7 +4,7 @@ os:
   - linux
 
 env:
- - TAGS="-tags travis"
+ - TAGS="-tags \"travis debugstack\""
 
 cache:
  directories:

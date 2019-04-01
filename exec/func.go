@@ -80,7 +80,9 @@ func (fn goFunction) call(vm *VM, index int64) {
 }
 
 func (compiled compiledFunction) call(vm *VM, index int64) {
-	newStack := make([]uint64, compiled.maxDepth)
+	// Make space on the stack for all intermediate values and
+	// a possible return value.
+	newStack := make([]uint64, 0, compiled.maxDepth+1)
 	locals := make([]uint64, compiled.totalLocalVars)
 
 	for i := compiled.args - 1; i >= 0; i-- {

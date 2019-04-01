@@ -238,6 +238,11 @@ func (vm *VM) popFloat32() float32 {
 }
 
 func (vm *VM) pushUint64(i uint64) {
+	if debugStackDepth {
+		if len(vm.ctx.stack) >= cap(vm.ctx.stack) {
+			panic("stack exceeding max depth: " + fmt.Sprintf("len=%d,cap=%d", len(vm.ctx.stack), cap(vm.ctx.stack)))
+		}
+	}
 	vm.ctx.stack = append(vm.ctx.stack, i)
 }
 
@@ -289,9 +294,14 @@ func (vm *VM) ExecCode(fnIndex int64, args ...uint64) (rtrn interface{}, err err
 	if !ok {
 		panic(fmt.Sprintf("exec: function at index %d is not a compiled function", fnIndex))
 	}
-	if len(vm.ctx.stack) < compiled.maxDepth {
-		vm.ctx.stack = make([]uint64, 0, compiled.maxDepth)
+
+	depth := compiled.maxDepth + 1
+	if cap(vm.ctx.stack) < depth {
+		vm.ctx.stack = make([]uint64, 0, depth)
+	} else {
+		vm.ctx.stack = vm.ctx.stack[:0]
 	}
+
 	vm.ctx.locals = make([]uint64, compiled.totalLocalVars)
 	vm.ctx.pc = 0
 	vm.ctx.code = compiled.code
