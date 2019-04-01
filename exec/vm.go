@@ -47,6 +47,7 @@ type context struct {
 	stack   []uint64
 	locals  []uint64
 	code    []byte
+	asm     []asmBlock
 	pc      int64
 	curFunc int64
 }
@@ -70,6 +71,8 @@ type VM struct {
 	RecoverPanic bool
 
 	abort bool // Flag for host functions to terminate execution
+
+	nativeBackend *nativeCompiler
 }
 
 // As per the WebAssembly spec: https://github.com/WebAssembly/design/blob/27ac254c854994103c24834a994be16f74f54186/Semantics.md#linear-memory
@@ -77,10 +80,30 @@ const wasmPageSize = 65536 // (64 KB)
 
 var endianess = binary.LittleEndian
 
-// NewVM creates a new VM from a given module. If the module defines a
-// start function, it will be executed.
-func NewVM(module *wasm.Module) (*VM, error) {
+type config struct {
+	EnableAOT bool
+}
+
+// VMOption describes a customization that can be applied to the VM.
+type VMOption func(c *config)
+
+// EnableAOT enables ahead-of-time compilation of supported opcodes
+// into runs of native instructions, if wagon supports native compilation
+// for the current architecture.
+func EnableAOT(v bool) VMOption {
+	return func(c *config) {
+		c.EnableAOT = v
+	}
+}
+
+// NewVM creates a new VM from a given module and options. If the module defines
+// a start function, it will be executed.
+func NewVM(module *wasm.Module, opts ...VMOption) (*VM, error) {
 	var vm VM
+	var options config
+	for _, opt := range opts {
+		opt(&options)
+	}
 
 	if module.Memory != nil && len(module.Memory.Entries) != 0 {
 		if len(module.Memory.Entries) > 1 {
@@ -122,10 +145,11 @@ func NewVM(module *wasm.Module) (*VM, error) {
 		for _, entry := range fn.Body.Locals {
 			totalLocalVars += int(entry.Count)
 		}
-		code, table := compile.Compile(disassembly.Code)
+		code, meta := compile.Compile(disassembly.Code)
 		vm.funcs[i] = compiledFunction{
+			codeMeta:       meta,
 			code:           code,
-			branchTables:   table,
+			branchTables:   meta.BranchTables,
 			maxDepth:       disassembly.MaxDepth,
 			totalLocalVars: totalLocalVars,
 			args:           len(fn.Sig.ParamTypes),
@@ -147,6 +171,16 @@ func NewVM(module *wasm.Module) (*VM, error) {
 			vm.globals[i] = uint64(math.Float32bits(v))
 		case float64:
 			vm.globals[i] = uint64(math.Float64bits(v))
+		}
+	}
+
+	if options.EnableAOT {
+		supportedBackend, backend := nativeBackend()
+		if supportedBackend {
+			vm.nativeBackend = backend
+			if err := vm.tryNativeCompile(); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -305,6 +339,7 @@ func (vm *VM) ExecCode(fnIndex int64, args ...uint64) (rtrn interface{}, err err
 	vm.ctx.locals = make([]uint64, compiled.totalLocalVars)
 	vm.ctx.pc = 0
 	vm.ctx.code = compiled.code
+	vm.ctx.asm = compiled.asm
 	vm.ctx.curFunc = fnIndex
 
 	for i, arg := range args {
@@ -400,6 +435,10 @@ outer:
 			place := vm.fetchInt64()
 			vm.ctx.stack = vm.ctx.stack[:len(vm.ctx.stack)-int(place)]
 			vm.pushUint64(top)
+
+		case ops.WagonNativeExec:
+			i := vm.fetchUint32()
+			vm.nativeCodeInvocation(i)
 		default:
 			vm.funcTable[op]()
 		}
@@ -409,6 +448,17 @@ outer:
 		return vm.ctx.stack[len(vm.ctx.stack)-1]
 	}
 	return 0
+}
+
+// Close frees any resources managed by the VM.
+func (vm *VM) Close() error {
+	vm.abort = true // prevents further use.
+	if vm.nativeBackend != nil {
+		if err := vm.nativeBackend.Close(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Process is a proxy passed to host functions in order to access

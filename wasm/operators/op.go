@@ -74,7 +74,8 @@ func (e InvalidOpcodeError) Error() string {
 // If code is invalid, an ErrInvalidOpcode is returned.
 func New(code byte) (Op, error) {
 	var op Op
-	if int(code) >= len(ops) {
+
+	if int(code) >= len(ops) || internalOpcodes[code] {
 		return op, InvalidOpcodeError(code)
 	}
 

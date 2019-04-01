@@ -253,7 +253,7 @@ func panics(fn func()) (panicked bool, msg string) {
 	return
 }
 
-func runTest(fileName string, testCases []testCase, t testing.TB) {
+func runTest(fileName string, testCases []testCase, t testing.TB, nativeBackend bool) {
 	file, err := os.Open(fileName)
 	if err != nil {
 		t.Fatal(err)
@@ -268,7 +268,7 @@ func runTest(fileName string, testCases []testCase, t testing.TB) {
 		t.Fatalf("%s: %v", fileName, err)
 	}
 
-	vm, err := exec.NewVM(module)
+	vm, err := exec.NewVM(module, exec.EnableAOT(nativeBackend))
 	if err != nil {
 		t.Fatalf("%s: %v", fileName, err)
 	}
@@ -362,7 +362,15 @@ func testModules(t *testing.T, dir string) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			runTest(path, testCases, t)
+			runTest(path, testCases, t, false)
+		})
+		t.Run(fileName+" native", func(t *testing.T) {
+			t.Parallel()
+			path, err := filepath.Abs(fileName)
+			if err != nil {
+				t.Fatal(err)
+			}
+			runTest(path, testCases, t, true)
 		})
 	}
 }
@@ -388,7 +396,7 @@ func BenchmarkModules(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
-			runTest(path, testCases, b)
+			runTest(path, testCases, b, false)
 		})
 	}
 }

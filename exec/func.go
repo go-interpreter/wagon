@@ -18,11 +18,21 @@ type function interface {
 
 type compiledFunction struct {
 	code           []byte
+	codeMeta       *compile.BytecodeMetadata
 	branchTables   []*compile.BranchTable
 	maxDepth       int  // maximum stack depth reached while executing the function body
 	totalLocalVars int  // number of local variables used by the function
 	args           int  // number of arguments the function accepts
 	returns        bool // whether the function returns a value
+
+	asm []asmBlock
+}
+
+type asmBlock struct {
+	// Compiled unit in native machine code.
+	nativeUnit compile.NativeCodeUnit
+	// where in the instruction stream to resume after native execution.
+	resumePC uint
 }
 
 type goFunction struct {
@@ -96,6 +106,7 @@ func (compiled compiledFunction) call(vm *VM, index int64) {
 		stack:   newStack,
 		locals:  locals,
 		code:    compiled.code,
+		asm:     compiled.asm,
 		pc:      0,
 		curFunc: index,
 	}
