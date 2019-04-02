@@ -37,7 +37,7 @@ func (s *CompilationCandidate) reset() {
 	s.Start = 0
 	s.End = 0
 	s.StartInstruction = 0
-	s.EndInstruction = 0
+	s.EndInstruction = 1
 	s.Metrics = Metrics{}
 }
 
@@ -86,7 +86,7 @@ func (s *scanner) ScanFunc(bytecode []byte, meta *BytecodeMetadata) ([]Compilati
 			inProgress.Start = uint(inst.Start)
 			inProgress.StartInstruction = i
 		}
-		inProgress.EndInstruction = i
+		inProgress.EndInstruction = i + 1
 		inProgress.End = uint(inst.Start) + uint(inst.Size)
 
 		// TODO: Add to this table as backends support more opcodes.
