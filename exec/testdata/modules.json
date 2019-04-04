@@ -1116,5 +1116,15 @@
         "trap": "i32:1"
       }
     ]
+  },
+  {
+    "file": "rust-basic.wasm",
+    "tests": [
+      {
+        "function": "x2_plus_y2_minus_13",
+        "args": ["i64:2", "i64:6"],
+        "return": "i64:28"
+      }
+    ]
   }
 ]
