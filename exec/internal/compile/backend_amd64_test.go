@@ -269,6 +269,104 @@ func TestAMD64OperationsI64(t *testing.T) {
 	}
 }
 
+func TestDivOpsI64(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.SkipNow()
+	}
+	testCases := []struct {
+		Name   string
+		Op     byte
+		Args   []uint64
+		Result uint64
+	}{
+		{
+			Name:   "unsigned-divide-1",
+			Op:     ops.I64DivU,
+			Args:   []uint64{88, 8},
+			Result: 11,
+		},
+		{
+			Name:   "unsigned-divide-2",
+			Op:     ops.I64DivU,
+			Args:   []uint64{7, 2},
+			Result: 3,
+		},
+		{
+			Name:   "unsigned-remainder-1",
+			Op:     ops.I64RemU,
+			Args:   []uint64{7, 2},
+			Result: 1,
+		},
+		{
+			Name:   "unsigned-remainder-2",
+			Op:     ops.I64RemU,
+			Args:   []uint64{12345, 12345},
+			Result: 0,
+		},
+		{
+			Name:   "signed-divide-1",
+			Op:     ops.I64DivS,
+			Args:   []uint64{88, 8},
+			Result: 11,
+		},
+		{
+			Name:   "signed-divide-2",
+			Op:     ops.I64DivS,
+			Args:   []uint64{-u64Const(80), 8},
+			Result: -u64Const(10),
+		},
+		{
+			Name:   "signed-divide-3",
+			Op:     ops.I64DivS,
+			Args:   []uint64{-u64Const(80), -u64Const(8)},
+			Result: 10,
+		},
+		{
+			Name:   "signed-remainder-1",
+			Op:     ops.I64RemS,
+			Args:   []uint64{7, 2},
+			Result: 1,
+		},
+	}
+
+	allocator := &MMapAllocator{}
+	defer allocator.Close()
+	b := &AMD64Backend{}
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			regs := &dirtyRegs{}
+			builder, err := asm.NewBuilder("amd64", 64)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b.emitPreamble(builder, regs)
+
+			for _, arg := range tc.Args {
+				b.emitPushI64(builder, regs, arg)
+			}
+			b.emitDivide(builder, regs, tc.Op)
+			b.emitPostamble(builder, regs)
+			out := builder.Assemble()
+
+			nativeBlock, err := allocator.AllocateExec(out)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			fakeStack := make([]uint64, 0, 5)
+			fakeLocals := make([]uint64, 0, 0)
+			nativeBlock.Invoke(&fakeStack, &fakeLocals)
+
+			if got, want := len(fakeStack), 1; got != want {
+				t.Fatalf("fakeStack.Len = %d, want %d", got, want)
+			}
+			if got, want := fakeStack[0], tc.Result; got != want {
+				t.Errorf("fakeStack[0] = %d, want %d", got, want)
+			}
+		})
+	}
+}
+
 // TestSliceMemoryLayoutAMD64 tests assumptions about the memory layout
 // of slices have not changed. These are not specified in the Go
 // spec.
@@ -290,4 +388,8 @@ func TestSliceMemoryLayoutAMD64(t *testing.T) {
 	if got, want := binary.LittleEndian.Uint64(mem[16:24]), uint64(5); got != want {
 		t.Errorf("Got cap = %d, want %d", got, want)
 	}
+}
+
+func u64Const(i uint64) uint64 {
+	return i
 }

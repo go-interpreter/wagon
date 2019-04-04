@@ -50,6 +50,10 @@ func (b *AMD64Backend) Scanner() *scanner {
 				ops.I64And:   true,
 				ops.I64Or:    true,
 				ops.I64Mul:   true,
+				ops.I64DivU:  true,
+				ops.I64DivS:  true,
+				ops.I64RemU:  true,
+				ops.I64RemS:  true,
 				ops.GetLocal: true,
 			},
 		}
@@ -82,6 +86,8 @@ func (b *AMD64Backend) Build(candidate CompilationCandidate, code []byte, meta *
 			if err := b.emitBinaryI64(builder, &regs, inst.Op); err != nil {
 				return nil, fmt.Errorf("compile: amd64.emitBinaryI64: %v", err)
 			}
+		case ops.I64DivU, ops.I64RemU, ops.I64DivS, ops.I64RemS:
+			b.emitDivide(builder, &regs, inst.Op)
 		default:
 			return nil, fmt.Errorf("compile: amd64 backend cannot handle inst[%d].Op 0x%x", i, inst.Op)
 		}
@@ -298,6 +304,40 @@ func (b *AMD64Backend) emitPushI64(builder *asm.Builder, regs *dirtyRegs, c uint
 	prog.To.Reg = x86.REG_AX
 	builder.AddInstruction(prog)
 	b.emitWasmStackPush(builder, regs, x86.REG_AX)
+}
+
+func (b *AMD64Backend) emitDivide(builder *asm.Builder, regs *dirtyRegs, op byte) {
+	b.emitWasmStackLoad(builder, regs, x86.REG_R9)
+	b.emitWasmStackLoad(builder, regs, x86.REG_AX)
+
+	prog := builder.NewProg()
+	prog.As = x86.AXORQ
+	prog.From.Type = obj.TYPE_REG
+	prog.From.Reg = x86.REG_DX
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_DX
+	builder.AddInstruction(prog)
+
+	prog = builder.NewProg()
+	switch op {
+	case ops.I64DivS, ops.I64RemS:
+		ext := builder.NewProg()
+		ext.As = x86.ACQO
+		builder.AddInstruction(ext)
+		prog.As = x86.AIDIVQ
+	default:
+		prog.As = x86.ADIVQ
+	}
+	prog.From.Type = obj.TYPE_REG
+	prog.From.Reg = x86.REG_R9
+	builder.AddInstruction(prog)
+
+	switch op {
+	case ops.I64RemU, ops.I64RemS:
+		b.emitWasmStackPush(builder, regs, x86.REG_DX)
+	default:
+		b.emitWasmStackPush(builder, regs, x86.REG_AX)
+	}
 }
 
 // emitPreamble is currently not needed.
