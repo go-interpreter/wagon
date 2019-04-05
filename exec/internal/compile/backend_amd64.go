@@ -56,9 +56,17 @@ func (b *AMD64Backend) Scanner() *scanner {
 				ops.I64RemU:  true,
 				ops.I64RemS:  true,
 				ops.GetLocal: true,
+				ops.SetLocal: true,
 				ops.I64Shl:   true,
 				ops.I64ShrU:  true,
 				ops.I64ShrS:  true,
+				ops.I64Eq:    true,
+				ops.I64Ne:    true,
+				ops.I64LtU:   true,
+				ops.I64GtU:   true,
+				ops.I64LeU:   true,
+				ops.I64GeU:   true,
+				ops.I64Eqz:   true,
 			},
 		}
 	}
@@ -86,6 +94,9 @@ func (b *AMD64Backend) Build(candidate CompilationCandidate, code []byte, meta *
 		case ops.GetLocal:
 			b.emitWasmLocalsLoad(builder, &regs, x86.REG_AX, b.readIntImmediate(code, inst))
 			b.emitWasmStackPush(builder, &regs, x86.REG_AX)
+		case ops.SetLocal:
+			b.emitWasmStackLoad(builder, &regs, x86.REG_AX)
+			b.emitWasmLocalsSave(builder, &regs, x86.REG_AX, b.readIntImmediate(code, inst))
 		case ops.I64Add, ops.I64Sub, ops.I64Mul, ops.I64Or, ops.I64And, ops.I64Xor:
 			if err := b.emitBinaryI64(builder, &regs, inst.Op); err != nil {
 				return nil, fmt.Errorf("compile: amd64.emitBinaryI64: %v", err)
@@ -95,6 +106,14 @@ func (b *AMD64Backend) Build(candidate CompilationCandidate, code []byte, meta *
 		case ops.I64Shl, ops.I64ShrU, ops.I64ShrS:
 			if err := b.emitShiftI64(builder, &regs, inst.Op); err != nil {
 				return nil, fmt.Errorf("compile: amd64.emitShiftI64: %v", err)
+			}
+		case ops.I64Eq, ops.I64Ne, ops.I64LtU, ops.I64GtU, ops.I64LeU, ops.I64GeU:
+			if err := b.emitComparison(builder, &regs, inst.Op); err != nil {
+				return nil, fmt.Errorf("compile: amd64.emitComparison: %v", err)
+			}
+		case ops.I64Eqz:
+			if err := b.emitUnaryComparison(builder, &regs, inst.Op); err != nil {
+				return nil, fmt.Errorf("compile: amd64.emitUnaryComparison: %v", err)
 			}
 		default:
 			return nil, fmt.Errorf("compile: amd64 backend cannot handle inst[%d].Op 0x%x", i, inst.Op)
@@ -152,6 +171,47 @@ func (b *AMD64Backend) emitWasmLocalsLoad(builder *asm.Builder, regs *dirtyRegs,
 	prog.From.Reg = x86.REG_R12
 	prog.To.Type = obj.TYPE_REG
 	prog.To.Reg = reg
+	builder.AddInstruction(prog)
+}
+
+func (b *AMD64Backend) emitWasmLocalsSave(builder *asm.Builder, regs *dirtyRegs, reg int16, index uint64) {
+	// movq r13, $(index)
+	// movq r12, [r11]
+	// leaq r12, [r12 + r13*8]
+	// movq [r12], reg
+
+	prog := builder.NewProg()
+	prog.As = x86.AMOVQ
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_R13
+	prog.From.Type = obj.TYPE_CONST
+	prog.From.Offset = int64(index)
+	builder.AddInstruction(prog)
+
+	prog = builder.NewProg()
+	prog.As = x86.AMOVQ
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_R12
+	prog.From.Type = obj.TYPE_MEM
+	prog.From.Reg = x86.REG_R11
+	builder.AddInstruction(prog)
+
+	prog = builder.NewProg()
+	prog.As = x86.ALEAQ
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_R12
+	prog.From.Type = obj.TYPE_MEM
+	prog.From.Reg = x86.REG_R12
+	prog.From.Scale = 8
+	prog.From.Index = x86.REG_R13
+	builder.AddInstruction(prog)
+
+	prog = builder.NewProg()
+	prog.As = x86.AMOVQ
+	prog.To.Type = obj.TYPE_MEM
+	prog.To.Reg = x86.REG_R12
+	prog.From.Type = obj.TYPE_REG
+	prog.From.Reg = reg
 	builder.AddInstruction(prog)
 }
 
@@ -373,6 +433,97 @@ func (b *AMD64Backend) emitDivide(builder *asm.Builder, regs *dirtyRegs, op byte
 	default:
 		b.emitWasmStackPush(builder, regs, x86.REG_AX)
 	}
+}
+
+func (b *AMD64Backend) emitComparison(builder *asm.Builder, regs *dirtyRegs, op byte) error {
+	b.emitWasmStackLoad(builder, regs, x86.REG_BX)
+	b.emitWasmStackLoad(builder, regs, x86.REG_CX)
+
+	// Operands are loaded in BX & CX.
+	// Output (1 or 0) is stored in AX, and initialized to 0.
+	// A set is used to update the register if the condition
+	// is true.
+
+	// xor rax, rax
+	// XOR is used as that is the fastest way to zero a register,
+	// and takes a single cycle on every generation since Pentium.
+	prog := builder.NewProg()
+	prog.As = x86.AXORQ
+	prog.From.Type = obj.TYPE_REG
+	prog.From.Reg = x86.REG_AX
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_AX
+	builder.AddInstruction(prog)
+
+	// cmp rbx, rcx
+	prog = builder.NewProg()
+	prog.As = x86.ACMPQ
+	prog.From.Type = obj.TYPE_REG
+	prog.From.Reg = x86.REG_CX
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_BX
+	builder.AddInstruction(prog)
+
+	// setXX al
+	// A set is used instead of conditional moves or branches, as it is the
+	// shortest instruction with the least impact on the branch predictor/cache.
+	prog = builder.NewProg()
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_AX
+	switch op {
+	case ops.I64Eq:
+		prog.As = x86.ASETEQ
+	case ops.I64Ne:
+		prog.As = x86.ASETNE
+	case ops.I64LtU:
+		prog.As = x86.ASETCS // SETA
+	case ops.I64GtU:
+		prog.As = x86.ASETHI // SETB
+	case ops.I64LeU:
+		prog.As = x86.ASETLS // SETBE
+	case ops.I64GeU:
+		prog.As = x86.ASETCC // SETAE
+	default:
+		return fmt.Errorf("cannot handle op: %x", op)
+	}
+	builder.AddInstruction(prog)
+
+	b.emitWasmStackPush(builder, regs, x86.REG_AX)
+	return nil
+}
+
+func (b *AMD64Backend) emitUnaryComparison(builder *asm.Builder, regs *dirtyRegs, op byte) error {
+	b.emitWasmStackLoad(builder, regs, x86.REG_BX)
+
+	prog := builder.NewProg()
+	prog.As = x86.AXORQ
+	prog.From.Type = obj.TYPE_REG
+	prog.From.Reg = x86.REG_AX
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_AX
+	builder.AddInstruction(prog)
+
+	prog = builder.NewProg()
+	prog.As = x86.ATESTQ
+	prog.From.Type = obj.TYPE_REG
+	prog.From.Reg = x86.REG_BX
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_BX
+	builder.AddInstruction(prog)
+
+	prog = builder.NewProg()
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_AX
+	switch op {
+	case ops.I64Eqz:
+		prog.As = x86.ASETEQ
+	default:
+		return fmt.Errorf("cannot handle op: %x", op)
+	}
+	builder.AddInstruction(prog)
+
+	b.emitWasmStackPush(builder, regs, x86.REG_AX)
+	return nil
 }
 
 // emitPreamble is currently not needed.

@@ -68,7 +68,7 @@ func (s *scanner) ScanFunc(bytecode []byte, meta *BytecodeMetadata) ([]Compilati
 		// where other parts of code try and call into us halfway. Maybe we
 		// can support that in the future.
 		_, hasInboundTarget := meta.InboundTargets[int64(inst.Start)]
-		isInsideBranchTarget := hasInboundTarget && inst.Start > 0
+		isInsideBranchTarget := hasInboundTarget && inst.Start > 0 && inProgress.Metrics.AllOps > 0
 
 		if !s.supportedOpcodes[inst.Op] || isInsideBranchTarget {
 			// See if the candidate can be emitted.
@@ -94,12 +94,18 @@ func (s *scanner) ScanFunc(bytecode []byte, meta *BytecodeMetadata) ([]Compilati
 		case ops.I64Const, ops.GetLocal:
 			inProgress.Metrics.IntegerOps++
 			inProgress.Metrics.StackWrites++
+		case ops.SetLocal:
+			inProgress.Metrics.IntegerOps++
+			inProgress.Metrics.StackReads++
+		case ops.I64Eqz:
+			inProgress.Metrics.IntegerOps++
+			inProgress.Metrics.StackReads++
+			inProgress.Metrics.StackWrites++
 
-		case ops.I64Shl, ops.I64ShrU, ops.I64ShrS:
-			fallthrough
-		case ops.I64DivU, ops.I64RemU, ops.I64DivS, ops.I64RemS:
-			fallthrough
-		case ops.I64Add, ops.I64Sub, ops.I64Mul, ops.I64And, ops.I64Or, ops.I64Xor:
+		case ops.I64Eq, ops.I64Ne, ops.I64LtU, ops.I64GtU, ops.I64LeU, ops.I64GeU,
+			ops.I64Shl, ops.I64ShrU, ops.I64ShrS,
+			ops.I64DivU, ops.I64RemU, ops.I64DivS, ops.I64RemS,
+			ops.I64Add, ops.I64Sub, ops.I64Mul, ops.I64And, ops.I64Or, ops.I64Xor:
 			inProgress.Metrics.IntegerOps++
 			inProgress.Metrics.StackReads += 2
 			inProgress.Metrics.StackWrites++

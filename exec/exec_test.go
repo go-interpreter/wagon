@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -407,4 +408,68 @@ func TestNonSpec(t *testing.T) {
 
 func TestSpec(t *testing.T) {
 	testModules(t, specTestsDir)
+}
+
+func loadModuleFindFunc(t *testing.B, fileName, funcName string, nativeBackend bool) (*exec.VM, uint32) {
+	file, err := os.Open(fileName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+
+	module, err := wasm.ReadModule(file, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = validate.VerifyModule(module); err != nil {
+		t.Fatalf("%s: %v", fileName, err)
+	}
+
+	vm, err := exec.NewVM(module, exec.EnableAOT(nativeBackend))
+	if err != nil {
+		t.Fatalf("%s: %v", fileName, err)
+	}
+	return vm, module.Export.Entries[funcName].Index
+}
+
+var benchmarkDummy interface{}
+
+func BenchmarkU64Arithmetic10Interpreted(b *testing.B) {
+	vm, funcIndex := loadModuleFindFunc(b, "testdata/rust-basic.wasm", "loopedArithmeticI64Benchmark", false)
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		benchmarkDummy, _ = vm.ExecCode(int64(funcIndex), 10, 10)
+	}
+}
+
+func BenchmarkU64Arithmetic10Native(b *testing.B) {
+	if runtime.GOARCH != "amd64" {
+		b.SkipNow()
+	}
+
+	vm, funcIndex := loadModuleFindFunc(b, "testdata/rust-basic.wasm", "loopedArithmeticI64Benchmark", true)
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		benchmarkDummy, _ = vm.ExecCode(int64(funcIndex), 10, 10)
+	}
+}
+
+func BenchmarkU64Arithmetic50Interpreted(b *testing.B) {
+	vm, funcIndex := loadModuleFindFunc(b, "testdata/rust-basic.wasm", "loopedArithmeticI64Benchmark", false)
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		benchmarkDummy, _ = vm.ExecCode(int64(funcIndex), 50, 1234)
+	}
+}
+
+func BenchmarkU64Arithmetic50Native(b *testing.B) {
+	if runtime.GOARCH != "amd64" {
+		b.SkipNow()
+	}
+
+	vm, funcIndex := loadModuleFindFunc(b, "testdata/rust-basic.wasm", "loopedArithmeticI64Benchmark", true)
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		benchmarkDummy, _ = vm.ExecCode(int64(funcIndex), 50, 1234)
+	}
 }

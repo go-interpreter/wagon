@@ -187,6 +187,51 @@ func TestAMD64LocalsGet(t *testing.T) {
 	}
 }
 
+func TestAMD64LocalsSet(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.SkipNow()
+	}
+	allocator := &MMapAllocator{}
+	defer allocator.Close()
+	builder, err := asm.NewBuilder("amd64", 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	b := &AMD64Backend{}
+	regs := &dirtyRegs{}
+	b.emitPreamble(builder, regs)
+	b.emitWasmLocalsLoad(builder, regs, x86.REG_AX, 0)
+	b.emitWasmLocalsSave(builder, regs, x86.REG_AX, 1)
+	b.emitWasmLocalsSave(builder, regs, x86.REG_AX, 2)
+	b.emitPushI64(builder, regs, 11)
+	b.emitWasmStackLoad(builder, regs, x86.REG_DX)
+	b.emitWasmLocalsSave(builder, regs, x86.REG_DX, 4)
+	b.emitPostamble(builder, regs)
+	out := builder.Assemble()
+
+	nativeBlock, err := allocator.AllocateExec(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fakeStack := make([]uint64, 0, 5)
+	fakeLocals := make([]uint64, 5, 5)
+	fakeLocals[0] = 1335
+	fakeLocals[1] = 2
+	nativeBlock.Invoke(&fakeStack, &fakeLocals)
+
+	if got, want := len(fakeStack), 0; got != want {
+		t.Errorf("fakeStack.Len = %d, want %d", got, want)
+	}
+	if got, want := fakeLocals[1], uint64(1335); got != want {
+		t.Errorf("fakeLocals[1] = %d, want %d", got, want)
+	}
+	if got, want := fakeLocals[4], uint64(11); got != want {
+		t.Errorf("fakeLocals[4] = %d, want %d", got, want)
+	}
+}
+
 func TestAMD64OperationsI64(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.SkipNow()
@@ -382,6 +427,158 @@ func TestDivOpsI64(t *testing.T) {
 			b.emitDivide(builder, regs, tc.Op)
 			b.emitPostamble(builder, regs)
 			out := builder.Assemble()
+
+			nativeBlock, err := allocator.AllocateExec(out)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			fakeStack := make([]uint64, 0, 5)
+			fakeLocals := make([]uint64, 0, 0)
+			nativeBlock.Invoke(&fakeStack, &fakeLocals)
+
+			if got, want := len(fakeStack), 1; got != want {
+				t.Fatalf("fakeStack.Len = %d, want %d", got, want)
+			}
+			if got, want := fakeStack[0], tc.Result; got != want {
+				t.Errorf("fakeStack[0] = %d, want %d", got, want)
+			}
+		})
+	}
+}
+
+func TestComparisonOps64(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.SkipNow()
+	}
+	testCases := []struct {
+		Name   string
+		Op     byte
+		Args   []uint64
+		Result uint64
+	}{
+		{
+			Name:   "equal-1",
+			Op:     ops.I64Eq,
+			Args:   []uint64{88, 8},
+			Result: 0,
+		},
+		{
+			Name:   "equal-2",
+			Op:     ops.I64Eq,
+			Args:   []uint64{88, 88},
+			Result: 1,
+		},
+		{
+			Name:   "not-equal-1",
+			Op:     ops.I64Ne,
+			Args:   []uint64{88, 88},
+			Result: 0,
+		},
+		{
+			Name:   "not-equal-2",
+			Op:     ops.I64Ne,
+			Args:   []uint64{-u64Const(2), -u64Const(3)},
+			Result: 1,
+		},
+		{
+			Name:   "less-than-1",
+			Op:     ops.I64LtU,
+			Args:   []uint64{2, 2},
+			Result: 0,
+		},
+		{
+			Name:   "less-than-2",
+			Op:     ops.I64LtU,
+			Args:   []uint64{2, 12145},
+			Result: 1,
+		},
+		{
+			Name:   "greater-than-1",
+			Op:     ops.I64GtU,
+			Args:   []uint64{2, 2},
+			Result: 0,
+		},
+		{
+			Name:   "greater-than-2",
+			Op:     ops.I64GtU,
+			Args:   []uint64{4, 2},
+			Result: 1,
+		},
+		{
+			Name:   "greater-equal-1",
+			Op:     ops.I64GeU,
+			Args:   []uint64{2, 2},
+			Result: 1,
+		},
+		{
+			Name:   "greater-equal-2",
+			Op:     ops.I64GeU,
+			Args:   []uint64{2, 4},
+			Result: 0,
+		},
+		{
+			Name:   "greater-equal-3",
+			Op:     ops.I64GeU,
+			Args:   []uint64{2, 1},
+			Result: 1,
+		},
+		{
+			Name:   "less-equal-1",
+			Op:     ops.I64LeU,
+			Args:   []uint64{2, 2},
+			Result: 1,
+		},
+		{
+			Name:   "less-equal-2",
+			Op:     ops.I64LeU,
+			Args:   []uint64{2, 4},
+			Result: 1,
+		},
+		{
+			Name:   "less-equal-3",
+			Op:     ops.I64LeU,
+			Args:   []uint64{2, 1},
+			Result: 0,
+		},
+		{
+			Name:   "equal-zero-1",
+			Op:     ops.I64Eqz,
+			Args:   []uint64{2},
+			Result: 0,
+		},
+		{
+			Name:   "equal-zero-2",
+			Op:     ops.I64Eqz,
+			Args:   []uint64{0},
+			Result: 1,
+		},
+	}
+
+	allocator := &MMapAllocator{}
+	defer allocator.Close()
+	b := &AMD64Backend{}
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			regs := &dirtyRegs{}
+			builder, err := asm.NewBuilder("amd64", 64)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b.emitPreamble(builder, regs)
+
+			for _, arg := range tc.Args {
+				b.emitPushI64(builder, regs, arg)
+			}
+			switch tc.Op {
+			case ops.I64Eqz:
+				b.emitUnaryComparison(builder, regs, tc.Op)
+			default:
+				b.emitComparison(builder, regs, tc.Op)
+			}
+			b.emitPostamble(builder, regs)
+			out := builder.Assemble()
+			//debugPrintAsm(out)
 
 			nativeBlock, err := allocator.AllocateExec(out)
 			if err != nil {

@@ -1124,6 +1124,16 @@
         "function": "x2_plus_y2_minus_13",
         "args": ["i64:2", "i64:6"],
         "return": "i64:28"
+      },
+      {
+        "function": "loopedArithmeticI64Benchmark",
+        "args": ["i64:8", "i64:16"],
+        "return": "i64:1989840"
+      },
+      {
+        "function": "loopedArithmeticI64Benchmark",
+        "args": ["i64:80", "i64:7"],
+        "return": "i64:110262743"
       }
     ]
   }

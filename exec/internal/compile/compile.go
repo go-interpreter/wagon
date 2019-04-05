@@ -276,7 +276,7 @@ func Compile(disassembly []disasm.Instr) ([]byte, *BytecodeMetadata) {
 			}
 
 			for _, table := range block.branchTables {
-				table.patchTable(table.blocksLen-depth-1, int64(block.offset))
+				table.patchTable(table.blocksLen-depth-1, int64(block.offset), inboundTargets)
 			}
 
 			delete(blocks, curBlockDepth)
@@ -400,7 +400,8 @@ func patchOffset(code []byte, start int64, addr int64, inboundTargets map[int64]
 	return buf
 }
 
-func (table *BranchTable) patchTable(block int, addr int64) {
+func (table *BranchTable) patchTable(block int, addr int64, inboundTargets map[int64]struct{}) {
+	inboundTargets[addr] = struct{}{}
 	if block < 0 {
 		panic("Invalid block value")
 	}
