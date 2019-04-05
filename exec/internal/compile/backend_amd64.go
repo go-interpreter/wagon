@@ -49,12 +49,16 @@ func (b *AMD64Backend) Scanner() *scanner {
 				ops.I64Sub:   true,
 				ops.I64And:   true,
 				ops.I64Or:    true,
+				ops.I64Xor:   true,
 				ops.I64Mul:   true,
 				ops.I64DivU:  true,
 				ops.I64DivS:  true,
 				ops.I64RemU:  true,
 				ops.I64RemS:  true,
 				ops.GetLocal: true,
+				ops.I64Shl:   true,
+				ops.I64ShrU:  true,
+				ops.I64ShrS:  true,
 			},
 		}
 	}
@@ -82,12 +86,16 @@ func (b *AMD64Backend) Build(candidate CompilationCandidate, code []byte, meta *
 		case ops.GetLocal:
 			b.emitWasmLocalsLoad(builder, &regs, x86.REG_AX, b.readIntImmediate(code, inst))
 			b.emitWasmStackPush(builder, &regs, x86.REG_AX)
-		case ops.I64Add, ops.I64Sub, ops.I64Mul, ops.I64Or, ops.I64And:
+		case ops.I64Add, ops.I64Sub, ops.I64Mul, ops.I64Or, ops.I64And, ops.I64Xor:
 			if err := b.emitBinaryI64(builder, &regs, inst.Op); err != nil {
 				return nil, fmt.Errorf("compile: amd64.emitBinaryI64: %v", err)
 			}
 		case ops.I64DivU, ops.I64RemU, ops.I64DivS, ops.I64RemS:
 			b.emitDivide(builder, &regs, inst.Op)
+		case ops.I64Shl, ops.I64ShrU, ops.I64ShrS:
+			if err := b.emitShiftI64(builder, &regs, inst.Op); err != nil {
+				return nil, fmt.Errorf("compile: amd64.emitShiftI64: %v", err)
+			}
 		default:
 			return nil, fmt.Errorf("compile: amd64 backend cannot handle inst[%d].Op 0x%x", i, inst.Op)
 		}
@@ -282,10 +290,37 @@ func (b *AMD64Backend) emitBinaryI64(builder *asm.Builder, regs *dirtyRegs, op b
 		prog.As = x86.AANDQ
 	case ops.I64Or:
 		prog.As = x86.AORQ
+	case ops.I64Xor:
+		prog.As = x86.AXORQ
 	case ops.I64Mul:
 		prog.As = x86.AMULQ
 		prog.From.Reg = x86.REG_R9
 		prog.To.Type = obj.TYPE_NONE
+	default:
+		return fmt.Errorf("cannot handle op: %x", op)
+	}
+	builder.AddInstruction(prog)
+
+	b.emitWasmStackPush(builder, regs, x86.REG_AX)
+	return nil
+}
+
+func (b *AMD64Backend) emitShiftI64(builder *asm.Builder, regs *dirtyRegs, op byte) error {
+	b.emitWasmStackLoad(builder, regs, x86.REG_CX)
+	b.emitWasmStackLoad(builder, regs, x86.REG_AX)
+
+	prog := builder.NewProg()
+	prog.From.Type = obj.TYPE_REG
+	prog.From.Reg = x86.REG_CX
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_AX
+	switch op {
+	case ops.I64Shl:
+		prog.As = x86.ASHLQ
+	case ops.I64ShrU:
+		prog.As = x86.ASHRQ
+	case ops.I64ShrS:
+		prog.As = x86.ASARQ
 	default:
 		return fmt.Errorf("cannot handle op: %x", op)
 	}

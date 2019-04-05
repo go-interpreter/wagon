@@ -222,10 +222,40 @@ func TestAMD64OperationsI64(t *testing.T) {
 			Result: 3,
 		},
 		{
+			Name:   "xor",
+			Op:     ops.I64Xor,
+			Args:   []uint64{1, 5},
+			Result: 4,
+		},
+		{
 			Name:   "multiply",
 			Op:     ops.I64Mul,
 			Args:   []uint64{11, 5},
 			Result: 55,
+		},
+		{
+			Name:   "shift-left",
+			Op:     ops.I64Shl,
+			Args:   []uint64{1, 3},
+			Result: 8,
+		},
+		{
+			Name:   "shift-right-unsigned",
+			Op:     ops.I64ShrU,
+			Args:   []uint64{16, 3},
+			Result: 2,
+		},
+		{
+			Name:   "shift-right-signed-1",
+			Op:     ops.I64ShrS,
+			Args:   []uint64{32, 1},
+			Result: 16,
+		},
+		{
+			Name:   "shift-right-signed-2",
+			Op:     ops.I64ShrS,
+			Args:   []uint64{-u64Const(64), 2},
+			Result: -u64Const(16),
 		},
 	}
 
@@ -239,12 +269,17 @@ func TestAMD64OperationsI64(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			b.emitPreamble(builder, regs)
 
+			b.emitPreamble(builder, regs)
 			for _, arg := range tc.Args {
 				b.emitPushI64(builder, regs, arg)
 			}
-			b.emitBinaryI64(builder, regs, tc.Op)
+			switch tc.Op {
+			case ops.I64Shl, ops.I64ShrU, ops.I64ShrS:
+				b.emitShiftI64(builder, regs, tc.Op)
+			default:
+				b.emitBinaryI64(builder, regs, tc.Op)
+			}
 			b.emitPostamble(builder, regs)
 			out := builder.Assemble()
 

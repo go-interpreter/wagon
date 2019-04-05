@@ -94,7 +94,12 @@ func (s *scanner) ScanFunc(bytecode []byte, meta *BytecodeMetadata) ([]Compilati
 		case ops.I64Const, ops.GetLocal:
 			inProgress.Metrics.IntegerOps++
 			inProgress.Metrics.StackWrites++
-		case ops.I64Add, ops.I64Sub, ops.I64Mul, ops.I64DivU, ops.I64RemU, ops.I64DivS, ops.I64RemS, ops.I64And, ops.I64Or:
+
+		case ops.I64Shl, ops.I64ShrU, ops.I64ShrS:
+			fallthrough
+		case ops.I64DivU, ops.I64RemU, ops.I64DivS, ops.I64RemS:
+			fallthrough
+		case ops.I64Add, ops.I64Sub, ops.I64Mul, ops.I64And, ops.I64Or, ops.I64Xor:
 			inProgress.Metrics.IntegerOps++
 			inProgress.Metrics.StackReads += 2
 			inProgress.Metrics.StackWrites++
