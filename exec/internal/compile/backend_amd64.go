@@ -14,21 +14,63 @@ import (
 	"github.com/twitchyliquid64/golang-asm/obj/x86"
 )
 
-// dirtyRegs hold booleans that are true when the register stores
-// a reserved value that needs to be flushed to memory.
+var rhsConstOptimizable = map[byte]bool{
+	ops.I64Add:  true,
+	ops.I64Sub:  true,
+	ops.I64Shl:  true,
+	ops.I64ShrU: true,
+}
+
+// dirtyRegs tracks registers which hold values that need to
+// be flushed.
 type dirtyRegs struct {
-	R12 bool
-	R13 bool
+	R13 dirtyState
+	R14 dirtyState
+	R15 dirtyState
+}
+
+func (regs *dirtyRegs) flush(builder *asm.Builder, reg uint16) {
+	var regState *dirtyState
+	switch reg {
+	case x86.REG_R13:
+		regState = &regs.R13
+	default:
+		panic(fmt.Sprintf("compile: unknown register: %v", reg))
+	}
+
+	switch *regState {
+	case stateScratch:
+		return
+	case stateStackFirstElem, stateLocalFirstElem:
+		return // Value does not change - no need to write back.
+	case stateStackLen:
+		prog := builder.NewProg()
+		prog.As = x86.AMOVQ
+		prog.From.Type = obj.TYPE_REG
+		prog.From.Reg = x86.REG_R13
+		prog.To.Type = obj.TYPE_MEM
+		prog.To.Reg = x86.REG_R10
+		prog.To.Offset = 8
+		builder.AddInstruction(prog)
+	default:
+		panic(fmt.Sprintf("compile: unknown regState: %v", regState))
+	}
+
+	*regState = stateScratch
 }
 
 // Details of the AMD64 backend:
 // Reserved registers (for now):
 //  - R10 - pointer to stack sliceHeader
 //  - R11 - pointer to locals sliceHeader
-//  - R12 - pointer for stack item
+//  - R12 - reserved for stack handling
 //  - R13 - stack size
+// Pseudo-scratch registers (can be used for scratch as long as their
+// dirtyState is updated):
+//  - R14 (cache's pointer to stack backing array)
+//  - R15 (cache's pointer to locals backing array)
 // Scratch registers:
-//  - RAX, RBX, RCX, RDX, R8, R9, R15
+//  - RAX, RBX, RCX, RDX, R8, R9
 // Most emission instructions make few attempts to optimize in order
 // to keep things simple, however a planned second pass peephole-optimizer
 //  should make a big difference.
@@ -88,6 +130,34 @@ func (b *AMD64Backend) Build(candidate CompilationCandidate, code []byte, meta *
 	for i := candidate.StartInstruction; i < candidate.EndInstruction; i++ {
 		//fmt.Printf("i=%d, meta=%+v, len=%d\n", i, meta.Instructions[i], len(code))
 		inst := meta.Instructions[i]
+
+		// Optimization: Const followed by binary instruction: sometimes can be
+		// reduced to a single operation.
+		if (inst.Op == ops.I64Const || inst.Op == ops.I32Const) && (i+1) < candidate.EndInstruction {
+			imm := b.readIntImmediate(code, inst)
+			nextInst := meta.Instructions[i+1]
+
+			switch _, ok := rhsConstOptimizable[nextInst.Op]; {
+			case ok && 0 <= imm && imm < 256:
+				if err := b.emitRHSConstOptimizedInstruction(builder, &regs, nextInst.Op, imm); err != nil {
+					return nil, fmt.Errorf("compile: amd64.emitRHSConstOptimizedInstruction: %v", err)
+				}
+				i++
+				continue
+			case nextInst.Op == ops.SetLocal:
+				prog := builder.NewProg()
+				prog.As = x86.AMOVQ
+				prog.To.Type = obj.TYPE_REG
+				prog.To.Reg = x86.REG_AX
+				prog.From.Type = obj.TYPE_CONST
+				prog.From.Offset = int64(imm)
+				builder.AddInstruction(prog)
+				b.emitWasmLocalsSave(builder, &regs, x86.REG_AX, b.readIntImmediate(code, nextInst))
+				i++
+				continue
+			}
+		}
+
 		switch inst.Op {
 		case ops.I64Const:
 			b.emitPushI64(builder, &regs, b.readIntImmediate(code, inst))
@@ -134,35 +204,38 @@ func (b *AMD64Backend) readIntImmediate(code []byte, meta InstructionMetadata) u
 }
 
 func (b *AMD64Backend) emitWasmLocalsLoad(builder *asm.Builder, regs *dirtyRegs, reg int16, index uint64) {
-	// movq r13, $(index)
-	// movq r12, [r11]
-	// leaq r12, [r12 + r13*8]
+	// movq rbx, $(index)
+	// movq r15, [r11] (if not cached)
+	// leaq r12, [r15 + rbx*8]
 	// movq reg, [r12]
 
 	prog := builder.NewProg()
 	prog.As = x86.AMOVQ
 	prog.To.Type = obj.TYPE_REG
-	prog.To.Reg = x86.REG_R13
+	prog.To.Reg = x86.REG_BX
 	prog.From.Type = obj.TYPE_CONST
 	prog.From.Offset = int64(index)
 	builder.AddInstruction(prog)
 
-	prog = builder.NewProg()
-	prog.As = x86.AMOVQ
-	prog.To.Type = obj.TYPE_REG
-	prog.To.Reg = x86.REG_R12
-	prog.From.Type = obj.TYPE_MEM
-	prog.From.Reg = x86.REG_R11
-	builder.AddInstruction(prog)
+	if regs.R15 != stateLocalFirstElem {
+		prog = builder.NewProg()
+		prog.As = x86.AMOVQ
+		prog.To.Type = obj.TYPE_REG
+		prog.To.Reg = x86.REG_R15
+		prog.From.Type = obj.TYPE_MEM
+		prog.From.Reg = x86.REG_R11
+		builder.AddInstruction(prog)
+		regs.R15 = stateLocalFirstElem
+	}
 
 	prog = builder.NewProg()
 	prog.As = x86.ALEAQ
 	prog.To.Type = obj.TYPE_REG
 	prog.To.Reg = x86.REG_R12
 	prog.From.Type = obj.TYPE_MEM
-	prog.From.Reg = x86.REG_R12
+	prog.From.Reg = x86.REG_R15
 	prog.From.Scale = 8
-	prog.From.Index = x86.REG_R13
+	prog.From.Index = x86.REG_BX
 	builder.AddInstruction(prog)
 
 	prog = builder.NewProg()
@@ -175,35 +248,38 @@ func (b *AMD64Backend) emitWasmLocalsLoad(builder *asm.Builder, regs *dirtyRegs,
 }
 
 func (b *AMD64Backend) emitWasmLocalsSave(builder *asm.Builder, regs *dirtyRegs, reg int16, index uint64) {
-	// movq r13, $(index)
-	// movq r12, [r11]
-	// leaq r12, [r12 + r13*8]
+	// movq rbx, $(index)
+	// movq r15, [r11] (if not cached)
+	// leaq r12, [r15 + rbx*8]
 	// movq [r12], reg
 
 	prog := builder.NewProg()
 	prog.As = x86.AMOVQ
 	prog.To.Type = obj.TYPE_REG
-	prog.To.Reg = x86.REG_R13
+	prog.To.Reg = x86.REG_BX
 	prog.From.Type = obj.TYPE_CONST
 	prog.From.Offset = int64(index)
 	builder.AddInstruction(prog)
 
-	prog = builder.NewProg()
-	prog.As = x86.AMOVQ
-	prog.To.Type = obj.TYPE_REG
-	prog.To.Reg = x86.REG_R12
-	prog.From.Type = obj.TYPE_MEM
-	prog.From.Reg = x86.REG_R11
-	builder.AddInstruction(prog)
+	if regs.R15 != stateLocalFirstElem {
+		prog = builder.NewProg()
+		prog.As = x86.AMOVQ
+		prog.To.Type = obj.TYPE_REG
+		prog.To.Reg = x86.REG_R15
+		prog.From.Type = obj.TYPE_MEM
+		prog.From.Reg = x86.REG_R11
+		builder.AddInstruction(prog)
+		regs.R15 = stateLocalFirstElem
+	}
 
 	prog = builder.NewProg()
 	prog.As = x86.ALEAQ
 	prog.To.Type = obj.TYPE_REG
 	prog.To.Reg = x86.REG_R12
 	prog.From.Type = obj.TYPE_MEM
-	prog.From.Reg = x86.REG_R12
+	prog.From.Reg = x86.REG_R15
 	prog.From.Scale = 8
-	prog.From.Index = x86.REG_R13
+	prog.From.Index = x86.REG_BX
 	builder.AddInstruction(prog)
 
 	prog = builder.NewProg()
@@ -216,21 +292,24 @@ func (b *AMD64Backend) emitWasmLocalsSave(builder *asm.Builder, regs *dirtyRegs,
 }
 
 func (b *AMD64Backend) emitWasmStackLoad(builder *asm.Builder, regs *dirtyRegs, reg int16) {
-	// movq r13,     [r10+8]
+	// movq r13,     [r10+8] (if not already loaded)
 	// decq r13
-	// movq [r10+8], r13
-	// movq r12,     [r10]
-	// leaq r12,     [r12 + r13*8]
+	// movq r14,     [r10] (if not already loaded)
+	// leaq r12,     [r14 + r13*8]
 	// movq reg,     [r12]
+	var prog *obj.Prog
 
-	prog := builder.NewProg()
-	prog.As = x86.AMOVQ
-	prog.To.Type = obj.TYPE_REG
-	prog.To.Reg = x86.REG_R13
-	prog.From.Type = obj.TYPE_MEM
-	prog.From.Reg = x86.REG_R10
-	prog.From.Offset = 8
-	builder.AddInstruction(prog)
+	if regs.R13 != stateStackLen {
+		prog = builder.NewProg()
+		prog.As = x86.AMOVQ
+		prog.To.Type = obj.TYPE_REG
+		prog.To.Reg = x86.REG_R13
+		prog.From.Type = obj.TYPE_MEM
+		prog.From.Reg = x86.REG_R10
+		prog.From.Offset = 8
+		builder.AddInstruction(prog)
+		regs.R13 = stateStackLen
+	}
 
 	prog = builder.NewProg()
 	prog.As = x86.ADECQ
@@ -238,29 +317,23 @@ func (b *AMD64Backend) emitWasmStackLoad(builder *asm.Builder, regs *dirtyRegs, 
 	prog.To.Reg = x86.REG_R13
 	builder.AddInstruction(prog)
 
-	prog = builder.NewProg()
-	prog.As = x86.AMOVQ
-	prog.From.Type = obj.TYPE_REG
-	prog.From.Reg = x86.REG_R13
-	prog.To.Type = obj.TYPE_MEM
-	prog.To.Reg = x86.REG_R10
-	prog.To.Offset = 8
-	builder.AddInstruction(prog)
-
-	prog = builder.NewProg()
-	prog.As = x86.AMOVQ
-	prog.To.Type = obj.TYPE_REG
-	prog.To.Reg = x86.REG_R12
-	prog.From.Type = obj.TYPE_MEM
-	prog.From.Reg = x86.REG_R10
-	builder.AddInstruction(prog)
+	if regs.R14 != stateStackFirstElem {
+		prog = builder.NewProg()
+		prog.As = x86.AMOVQ
+		prog.To.Type = obj.TYPE_REG
+		prog.To.Reg = x86.REG_R14
+		prog.From.Type = obj.TYPE_MEM
+		prog.From.Reg = x86.REG_R10
+		builder.AddInstruction(prog)
+		regs.R14 = stateStackFirstElem
+	}
 
 	prog = builder.NewProg()
 	prog.As = x86.ALEAQ
 	prog.To.Type = obj.TYPE_REG
 	prog.To.Reg = x86.REG_R12
 	prog.From.Type = obj.TYPE_MEM
-	prog.From.Reg = x86.REG_R12
+	prog.From.Reg = x86.REG_R14
 	prog.From.Scale = 8
 	prog.From.Index = x86.REG_R13
 	builder.AddInstruction(prog)
@@ -275,35 +348,42 @@ func (b *AMD64Backend) emitWasmStackLoad(builder *asm.Builder, regs *dirtyRegs, 
 }
 
 func (b *AMD64Backend) emitWasmStackPush(builder *asm.Builder, regs *dirtyRegs, reg int16) {
-	// movq r12,     [r10]
-	// movq r13,     [r10+8]
-	// leaq r12,     [r12 + r13*8]
+	// movq r14,     [r10] (if not already loaded)
+	// movq r13,     [r10+8] (if not already loaded)
+	// leaq r12,     [r14 + r13*8]
 	// movq [r12],   reg
 	// incq r13
-	// movq [r10+8], r13
-	prog := builder.NewProg()
-	prog.As = x86.AMOVQ
-	prog.To.Type = obj.TYPE_REG
-	prog.To.Reg = x86.REG_R12
-	prog.From.Type = obj.TYPE_MEM
-	prog.From.Reg = x86.REG_R10
-	builder.AddInstruction(prog)
 
-	prog = builder.NewProg()
-	prog.As = x86.AMOVQ
-	prog.To.Type = obj.TYPE_REG
-	prog.To.Reg = x86.REG_R13
-	prog.From.Type = obj.TYPE_MEM
-	prog.From.Reg = x86.REG_R10
-	prog.From.Offset = 8
-	builder.AddInstruction(prog)
+	var prog *obj.Prog
+	if regs.R14 != stateStackFirstElem {
+		prog = builder.NewProg()
+		prog.As = x86.AMOVQ
+		prog.To.Type = obj.TYPE_REG
+		prog.To.Reg = x86.REG_R14
+		prog.From.Type = obj.TYPE_MEM
+		prog.From.Reg = x86.REG_R10
+		builder.AddInstruction(prog)
+		regs.R14 = stateStackFirstElem
+	}
+
+	if regs.R13 != stateStackLen {
+		prog = builder.NewProg()
+		prog.As = x86.AMOVQ
+		prog.To.Type = obj.TYPE_REG
+		prog.To.Reg = x86.REG_R13
+		prog.From.Type = obj.TYPE_MEM
+		prog.From.Reg = x86.REG_R10
+		prog.From.Offset = 8
+		builder.AddInstruction(prog)
+		regs.R13 = stateStackLen
+	}
 
 	prog = builder.NewProg()
 	prog.As = x86.ALEAQ
 	prog.To.Type = obj.TYPE_REG
 	prog.To.Reg = x86.REG_R12
 	prog.From.Type = obj.TYPE_MEM
-	prog.From.Reg = x86.REG_R12
+	prog.From.Reg = x86.REG_R14
 	prog.From.Scale = 8
 	prog.From.Index = x86.REG_R13
 	builder.AddInstruction(prog)
@@ -320,15 +400,6 @@ func (b *AMD64Backend) emitWasmStackPush(builder *asm.Builder, regs *dirtyRegs, 
 	prog.As = x86.AINCQ
 	prog.To.Type = obj.TYPE_REG
 	prog.To.Reg = x86.REG_R13
-	builder.AddInstruction(prog)
-
-	prog = builder.NewProg()
-	prog.As = x86.AMOVQ
-	prog.From.Type = obj.TYPE_REG
-	prog.From.Reg = x86.REG_R13
-	prog.To.Type = obj.TYPE_MEM
-	prog.To.Reg = x86.REG_R10
-	prog.To.Offset = 8
 	builder.AddInstruction(prog)
 }
 
@@ -356,6 +427,33 @@ func (b *AMD64Backend) emitBinaryI64(builder *asm.Builder, regs *dirtyRegs, op b
 		prog.As = x86.AMULQ
 		prog.From.Reg = x86.REG_R9
 		prog.To.Type = obj.TYPE_NONE
+	default:
+		return fmt.Errorf("cannot handle op: %x", op)
+	}
+	builder.AddInstruction(prog)
+
+	b.emitWasmStackPush(builder, regs, x86.REG_AX)
+	return nil
+}
+
+func (b *AMD64Backend) emitRHSConstOptimizedInstruction(builder *asm.Builder, regs *dirtyRegs, op byte, immediate uint64) error {
+
+	b.emitWasmStackLoad(builder, regs, x86.REG_AX)
+
+	prog := builder.NewProg()
+	prog.From.Type = obj.TYPE_CONST
+	prog.From.Offset = int64(immediate)
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_AX
+	switch op {
+	case ops.I64Add:
+		prog.As = x86.AADDQ
+	case ops.I64Sub:
+		prog.As = x86.ASUBQ
+	case ops.I64Shl:
+		prog.As = x86.ASHLQ
+	case ops.I64ShrU:
+		prog.As = x86.ASHRQ
 	default:
 		return fmt.Errorf("cannot handle op: %x", op)
 	}
@@ -531,6 +629,8 @@ func (b *AMD64Backend) emitPreamble(builder *asm.Builder, regs *dirtyRegs) {
 }
 
 func (b *AMD64Backend) emitPostamble(builder *asm.Builder, regs *dirtyRegs) {
+	regs.flush(builder, x86.REG_R13)
+
 	ret := builder.NewProg()
 	ret.As = obj.ARET
 	builder.AddInstruction(ret)

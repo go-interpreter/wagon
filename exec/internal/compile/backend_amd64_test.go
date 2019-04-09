@@ -7,6 +7,7 @@
 package compile
 
 import (
+	"bytes"
 	"encoding/binary"
 	"runtime"
 	"testing"
@@ -594,6 +595,105 @@ func TestComparisonOps64(t *testing.T) {
 			}
 			if got, want := fakeStack[0], tc.Result; got != want {
 				t.Errorf("fakeStack[0] = %d, want %d", got, want)
+			}
+		})
+	}
+}
+
+func TestAMD64RHSOptimizations(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.SkipNow()
+	}
+	tcs := []struct {
+		name        string
+		candidate   CompilationCandidate
+		code        []byte
+		meta        *BytecodeMetadata
+		checkOffset int
+		expected    []byte
+	}{
+		{
+			name: "add",
+			code: []byte{ops.I64Const, 3, 0, 0, 0, ops.I64Add},
+			candidate: CompilationCandidate{
+				EndInstruction: 2,
+				End:            6,
+			},
+			meta: &BytecodeMetadata{
+				Instructions: []InstructionMetadata{
+					{Op: ops.I64Const, Size: 5},
+					{Op: ops.I64Add, Start: 5, Size: 1},
+				},
+			},
+			checkOffset: 0x12,
+			expected:    []byte{0x48, 0x83, 0xC0, 0x03}, // add rax, 0x3
+		},
+		{
+			name: "sub",
+			code: []byte{ops.I64Const, 6, 0, 0, 0, ops.I64Sub},
+			candidate: CompilationCandidate{
+				EndInstruction: 2,
+				End:            6,
+			},
+			meta: &BytecodeMetadata{
+				Instructions: []InstructionMetadata{
+					{Op: ops.I64Const, Size: 5},
+					{Op: ops.I64Sub, Start: 5, Size: 1},
+				},
+			},
+			checkOffset: 0x12,
+			expected:    []byte{0x48, 0x83, 0xE8, 0x06}, // sub rax, 0x6
+		},
+		{
+			name: "shl",
+			code: []byte{ops.I64Const, 6, 0, 0, 0, ops.I64Shl},
+			candidate: CompilationCandidate{
+				EndInstruction: 2,
+				End:            6,
+			},
+			meta: &BytecodeMetadata{
+				Instructions: []InstructionMetadata{
+					{Op: ops.I64Const, Size: 5},
+					{Op: ops.I64Shl, Start: 5, Size: 1},
+				},
+			},
+			checkOffset: 0x12,
+			expected:    []byte{0x48, 0xC1, 0xE0, 0x06}, // shl rax, 0x6
+		},
+		{
+			name: "shrU",
+			code: []byte{ops.I64Const, 6, 0, 0, 0, ops.I64ShrU},
+			candidate: CompilationCandidate{
+				EndInstruction: 2,
+				End:            6,
+			},
+			meta: &BytecodeMetadata{
+				Instructions: []InstructionMetadata{
+					{Op: ops.I64Const, Size: 5},
+					{Op: ops.I64ShrU, Start: 5, Size: 1},
+				},
+			},
+			checkOffset: 0x12,
+			expected:    []byte{0x48, 0xC1, 0xE8, 0x06}, // shr rax, 0x6
+		},
+	}
+
+	allocator := &MMapAllocator{}
+	defer allocator.Close()
+	b := &AMD64Backend{}
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := b.Build(tc.candidate, tc.code, tc.meta)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if len(out) < tc.checkOffset+len(tc.expected) {
+				t.Fatalf("len(out) < %d", tc.checkOffset+len(tc.expected))
+			}
+			if !bytes.Equal(out[tc.checkOffset:tc.checkOffset+len(tc.expected)], tc.expected) {
+				t.Errorf("got %v, want %v", out[tc.checkOffset:tc.checkOffset+len(tc.expected)], tc.expected)
 			}
 		})
 	}
