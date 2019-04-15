@@ -254,7 +254,7 @@ func panics(fn func()) (panicked bool, msg string) {
 	return
 }
 
-func runTest(fileName string, testCases []testCase, t testing.TB, nativeBackend bool) {
+func runTest(fileName string, testCases []testCase, t testing.TB, nativeBackend bool, repeat bool) {
 	file, err := os.Open(fileName)
 	if err != nil {
 		t.Fatal(err)
@@ -306,6 +306,10 @@ func runTest(fileName string, testCases []testCase, t testing.TB, nativeBackend 
 		if ok {
 			times = b.N
 			b.ResetTimer()
+		} else {
+			if repeat {
+				times++
+			}
 		}
 
 		var res interface{}
@@ -313,6 +317,9 @@ func runTest(fileName string, testCases []testCase, t testing.TB, nativeBackend 
 
 		for i := 0; i < times; i++ {
 			res, err = vm.ExecCode(int64(index), args...)
+			if repeat {
+				vm.Restart()
+			}
 		}
 		if ok {
 			b.StopTimer()
@@ -341,7 +348,7 @@ func runTest(fileName string, testCases []testCase, t testing.TB, nativeBackend 
 	}
 }
 
-func testModules(t *testing.T, dir string) {
+func testModules(t *testing.T, dir string, repeat bool) {
 	files := []file{}
 	file, err := os.Open(filepath.Join(dir, "modules.json"))
 	if err != nil {
@@ -363,7 +370,7 @@ func testModules(t *testing.T, dir string) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			runTest(path, testCases, t, false)
+			runTest(path, testCases, t, false, repeat)
 		})
 		t.Run(fileName+" native", func(t *testing.T) {
 			t.Parallel()
@@ -371,7 +378,7 @@ func testModules(t *testing.T, dir string) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			runTest(path, testCases, t, true)
+			runTest(path, testCases, t, true, repeat)
 		})
 	}
 }
@@ -397,17 +404,21 @@ func BenchmarkModules(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
-			runTest(path, testCases, b, false)
+			runTest(path, testCases, b, false, false)
 		})
 	}
 }
 
 func TestNonSpec(t *testing.T) {
-	testModules(t, nonSpecTestsDir)
+	testModules(t, nonSpecTestsDir, false)
 }
 
 func TestSpec(t *testing.T) {
-	testModules(t, specTestsDir)
+	testModules(t, specTestsDir, false)
+}
+
+func TestVMRestart(t *testing.T) {
+	testModules(t, nonSpecTestsDir, true)
 }
 
 func loadModuleFindFunc(t *testing.B, fileName, funcName string, nativeBackend bool) (*exec.VM, uint32) {

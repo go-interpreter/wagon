@@ -157,20 +157,14 @@ func NewVM(module *wasm.Module, opts ...VMOption) (*VM, error) {
 		}
 	}
 
-	for i, global := range module.GlobalIndexSpace {
-		val, err := module.ExecInitExpr(global.Init)
+	if err := vm.resetGlobals(); err != nil {
+		return nil, err
+	}
+
+	if module.Start != nil {
+		_, err := vm.ExecCode(int64(module.Start.Index))
 		if err != nil {
 			return nil, err
-		}
-		switch v := val.(type) {
-		case int32:
-			vm.globals[i] = uint64(v)
-		case int64:
-			vm.globals[i] = uint64(v)
-		case float32:
-			vm.globals[i] = uint64(math.Float32bits(v))
-		case float64:
-			vm.globals[i] = uint64(math.Float64bits(v))
 		}
 	}
 
@@ -184,14 +178,28 @@ func NewVM(module *wasm.Module, opts ...VMOption) (*VM, error) {
 		}
 	}
 
-	if module.Start != nil {
-		_, err := vm.ExecCode(int64(module.Start.Index))
+	return &vm, nil
+}
+
+func (vm *VM) resetGlobals() error {
+	for i, global := range vm.module.GlobalIndexSpace {
+		val, err := vm.module.ExecInitExpr(global.Init)
 		if err != nil {
-			return nil, err
+			return err
+		}
+		switch v := val.(type) {
+		case int32:
+			vm.globals[i] = uint64(v)
+		case int64:
+			vm.globals[i] = uint64(v)
+		case float32:
+			vm.globals[i] = uint64(math.Float32bits(v))
+		case float64:
+			vm.globals[i] = uint64(math.Float64bits(v))
 		}
 	}
 
-	return &vm, nil
+	return nil
 }
 
 // Memory returns the linear memory space for the VM.
@@ -448,6 +456,13 @@ outer:
 		return vm.ctx.stack[len(vm.ctx.stack)-1]
 	}
 	return 0
+}
+
+// Restart readies the VM for another run.
+func (vm *VM) Restart() {
+	vm.resetGlobals()
+	vm.ctx.locals = make([]uint64, 0)
+	vm.abort = false
 }
 
 // Close frees any resources managed by the VM.

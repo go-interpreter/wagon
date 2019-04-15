@@ -86,9 +86,9 @@ func TestNativeAsmStructureSetup(t *testing.T) {
 	// setup mocks.
 	nc.Scanner.(*mockSequenceScanner).emit = []compile.CompilationCandidate{
 		// Sequence with single integer op - should not compiled.
-		compile.CompilationCandidate{Start: 0, End: 7, EndInstruction: 4, Metrics: compile.Metrics{IntegerOps: 1}},
+		{Start: 0, End: 7, EndInstruction: 4, Metrics: compile.Metrics{IntegerOps: 1}},
 		// Sequence with two integer ops - should be emitted.
-		compile.CompilationCandidate{Start: 7, End: 15, StartInstruction: 4, EndInstruction: 10, Metrics: compile.Metrics{IntegerOps: 2}},
+		{Start: 7, End: 15, StartInstruction: 4, EndInstruction: 10, Metrics: compile.Metrics{IntegerOps: 2}},
 	}
 
 	if err := vm.tryNativeCompile(); err != nil {
