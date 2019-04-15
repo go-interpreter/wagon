@@ -233,8 +233,8 @@ func (w *writer) writeMemory() {
 		w.WriteString(tab + "(memory ")
 		w.Print("(;%d;)", i)
 		w.Print(" %d", e.Limits.Initial)
-		if e.Limits.Maximum != 0 {
-			w.Print(" %d", e.Limits.Initial)
+		if e.Limits.Flags&0x1 != 0 {
+			w.Print(" %d", e.Limits.Maximum)
 		}
 		w.WriteString(")")
 	}
