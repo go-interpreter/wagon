@@ -87,16 +87,27 @@ func (b *AMD64Backend) Scanner() *scanner {
 		b.s = &scanner{
 			supportedOpcodes: map[byte]bool{
 				ops.I64Const: true,
+				ops.I32Const: true,
 				ops.I64Add:   true,
+				ops.I32Add:   true,
 				ops.I64Sub:   true,
+				ops.I32Sub:   true,
 				ops.I64And:   true,
+				ops.I32And:   true,
 				ops.I64Or:    true,
+				ops.I32Or:    true,
 				ops.I64Xor:   true,
+				ops.I32Xor:   true,
 				ops.I64Mul:   true,
+				ops.I32Mul:   true,
 				ops.I64DivU:  true,
+				ops.I32DivU:  true,
 				ops.I64DivS:  true,
+				ops.I32DivS:  true,
 				ops.I64RemU:  true,
+				ops.I32RemU:  true,
 				ops.I64RemS:  true,
+				ops.I32RemS:  true,
 				ops.GetLocal: true,
 				ops.SetLocal: true,
 				ops.I64Shl:   true,
@@ -159,19 +170,20 @@ func (b *AMD64Backend) Build(candidate CompilationCandidate, code []byte, meta *
 		}
 
 		switch inst.Op {
-		case ops.I64Const:
-			b.emitPushI64(builder, &regs, b.readIntImmediate(code, inst))
+		case ops.I64Const, ops.I32Const:
+			b.emitPushImmediate(builder, &regs, b.readIntImmediate(code, inst))
 		case ops.GetLocal:
 			b.emitWasmLocalsLoad(builder, &regs, x86.REG_AX, b.readIntImmediate(code, inst))
 			b.emitWasmStackPush(builder, &regs, x86.REG_AX)
 		case ops.SetLocal:
 			b.emitWasmStackLoad(builder, &regs, x86.REG_AX)
 			b.emitWasmLocalsSave(builder, &regs, x86.REG_AX, b.readIntImmediate(code, inst))
-		case ops.I64Add, ops.I64Sub, ops.I64Mul, ops.I64Or, ops.I64And, ops.I64Xor:
+		case ops.I64Add, ops.I32Add, ops.I64Sub, ops.I32Sub, ops.I64Mul, ops.I32Mul,
+			ops.I64Or, ops.I32Or, ops.I64And, ops.I32And, ops.I64Xor, ops.I32Xor:
 			if err := b.emitBinaryI64(builder, &regs, inst.Op); err != nil {
 				return nil, fmt.Errorf("compile: amd64.emitBinaryI64: %v", err)
 			}
-		case ops.I64DivU, ops.I64RemU, ops.I64DivS, ops.I64RemS:
+		case ops.I64DivU, ops.I32DivU, ops.I64RemU, ops.I32RemU, ops.I64DivS, ops.I32DivS, ops.I64RemS, ops.I32RemS:
 			b.emitDivide(builder, &regs, inst.Op)
 		case ops.I64Shl, ops.I64ShrU, ops.I64ShrS:
 			if err := b.emitShiftI64(builder, &regs, inst.Op); err != nil {
@@ -415,16 +427,30 @@ func (b *AMD64Backend) emitBinaryI64(builder *asm.Builder, regs *dirtyRegs, op b
 	switch op {
 	case ops.I64Add:
 		prog.As = x86.AADDQ
+	case ops.I32Add:
+		prog.As = x86.AADDL
 	case ops.I64Sub:
 		prog.As = x86.ASUBQ
+	case ops.I32Sub:
+		prog.As = x86.ASUBL
 	case ops.I64And:
 		prog.As = x86.AANDQ
+	case ops.I32And:
+		prog.As = x86.AANDL
 	case ops.I64Or:
 		prog.As = x86.AORQ
+	case ops.I32Or:
+		prog.As = x86.AORL
 	case ops.I64Xor:
 		prog.As = x86.AXORQ
+	case ops.I32Xor:
+		prog.As = x86.AXORL
 	case ops.I64Mul:
 		prog.As = x86.AMULQ
+		prog.From.Reg = x86.REG_R9
+		prog.To.Type = obj.TYPE_NONE
+	case ops.I32Mul:
+		prog.As = x86.AMULL
 		prog.From.Reg = x86.REG_R9
 		prog.To.Type = obj.TYPE_NONE
 	default:
@@ -488,7 +514,7 @@ func (b *AMD64Backend) emitShiftI64(builder *asm.Builder, regs *dirtyRegs, op by
 	return nil
 }
 
-func (b *AMD64Backend) emitPushI64(builder *asm.Builder, regs *dirtyRegs, c uint64) {
+func (b *AMD64Backend) emitPushImmediate(builder *asm.Builder, regs *dirtyRegs, c uint64) {
 	prog := builder.NewProg()
 	prog.As = x86.AMOVQ
 	prog.From.Type = obj.TYPE_CONST
@@ -513,23 +539,32 @@ func (b *AMD64Backend) emitDivide(builder *asm.Builder, regs *dirtyRegs, op byte
 
 	prog = builder.NewProg()
 	switch op {
+	case ops.I64DivU, ops.I64RemU:
+		prog.As = x86.ADIVQ
+	case ops.I32DivU, ops.I32RemU:
+		prog.As = x86.ADIVL
 	case ops.I64DivS, ops.I64RemS:
 		ext := builder.NewProg()
 		ext.As = x86.ACQO
 		builder.AddInstruction(ext)
 		prog.As = x86.AIDIVQ
+	case ops.I32DivS, ops.I32RemS:
+		ext := builder.NewProg()
+		ext.As = x86.ACDQ
+		builder.AddInstruction(ext)
+		prog.As = x86.AIDIVL
 	default:
-		prog.As = x86.ADIVQ
+		panic(fmt.Sprintf("cannot handle op: %x", op))
 	}
 	prog.From.Type = obj.TYPE_REG
 	prog.From.Reg = x86.REG_R9
 	builder.AddInstruction(prog)
 
 	switch op {
-	case ops.I64RemU, ops.I64RemS:
-		b.emitWasmStackPush(builder, regs, x86.REG_DX)
-	default:
+	case ops.I64DivU, ops.I32DivU, ops.I64DivS, ops.I32DivS:
 		b.emitWasmStackPush(builder, regs, x86.REG_AX)
+	case ops.I64RemU, ops.I32RemU, ops.I64RemS, ops.I32RemS:
+		b.emitWasmStackPush(builder, regs, x86.REG_DX)
 	}
 }
 

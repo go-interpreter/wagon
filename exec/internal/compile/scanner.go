@@ -91,7 +91,7 @@ func (s *scanner) ScanFunc(bytecode []byte, meta *BytecodeMetadata) ([]Compilati
 
 		// TODO: Add to this table as backends support more opcodes.
 		switch inst.Op {
-		case ops.I64Const, ops.GetLocal:
+		case ops.I64Const, ops.I32Const, ops.GetLocal:
 			inProgress.Metrics.IntegerOps++
 			inProgress.Metrics.StackWrites++
 		case ops.SetLocal:
@@ -104,8 +104,9 @@ func (s *scanner) ScanFunc(bytecode []byte, meta *BytecodeMetadata) ([]Compilati
 
 		case ops.I64Eq, ops.I64Ne, ops.I64LtU, ops.I64GtU, ops.I64LeU, ops.I64GeU,
 			ops.I64Shl, ops.I64ShrU, ops.I64ShrS,
-			ops.I64DivU, ops.I64RemU, ops.I64DivS, ops.I64RemS,
-			ops.I64Add, ops.I64Sub, ops.I64Mul, ops.I64And, ops.I64Or, ops.I64Xor:
+			ops.I64DivU, ops.I32DivU, ops.I64RemU, ops.I32RemU, ops.I64DivS, ops.I32DivS, ops.I64RemS, ops.I32RemS,
+			ops.I64Add, ops.I32Add, ops.I64Sub, ops.I32Sub, ops.I64Mul, ops.I32Mul,
+			ops.I64And, ops.I32And, ops.I64Or, ops.I32Or, ops.I64Xor, ops.I32Xor:
 			inProgress.Metrics.IntegerOps++
 			inProgress.Metrics.StackReads += 2
 			inProgress.Metrics.StackWrites++

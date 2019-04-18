@@ -205,7 +205,7 @@ func TestAMD64LocalsSet(t *testing.T) {
 	b.emitWasmLocalsLoad(builder, regs, x86.REG_AX, 0)
 	b.emitWasmLocalsSave(builder, regs, x86.REG_AX, 1)
 	b.emitWasmLocalsSave(builder, regs, x86.REG_AX, 2)
-	b.emitPushI64(builder, regs, 11)
+	b.emitPushImmediate(builder, regs, 11)
 	b.emitWasmStackLoad(builder, regs, x86.REG_DX)
 	b.emitWasmLocalsSave(builder, regs, x86.REG_DX, 4)
 	b.emitPostamble(builder, regs)
@@ -318,7 +318,7 @@ func TestAMD64OperationsI64(t *testing.T) {
 
 			b.emitPreamble(builder, regs)
 			for _, arg := range tc.Args {
-				b.emitPushI64(builder, regs, arg)
+				b.emitPushImmediate(builder, regs, arg)
 			}
 			switch tc.Op {
 			case ops.I64Shl, ops.I64ShrU, ops.I64ShrS:
@@ -350,7 +350,7 @@ func TestAMD64OperationsI64(t *testing.T) {
 	}
 }
 
-func TestDivOpsI64(t *testing.T) {
+func TestDivOps(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.SkipNow()
 	}
@@ -361,52 +361,76 @@ func TestDivOpsI64(t *testing.T) {
 		Result uint64
 	}{
 		{
-			Name:   "unsigned-divide-1",
+			Name:   "I64-unsigned-divide-1",
 			Op:     ops.I64DivU,
 			Args:   []uint64{88, 8},
 			Result: 11,
 		},
 		{
-			Name:   "unsigned-divide-2",
+			Name:   "I64-unsigned-divide-2",
 			Op:     ops.I64DivU,
 			Args:   []uint64{7, 2},
 			Result: 3,
 		},
 		{
-			Name:   "unsigned-remainder-1",
+			Name:   "I64-unsigned-remainder-1",
 			Op:     ops.I64RemU,
 			Args:   []uint64{7, 2},
 			Result: 1,
 		},
 		{
-			Name:   "unsigned-remainder-2",
+			Name:   "I64-unsigned-remainder-2",
 			Op:     ops.I64RemU,
 			Args:   []uint64{12345, 12345},
 			Result: 0,
 		},
 		{
-			Name:   "signed-divide-1",
+			Name:   "I64-signed-divide-1",
 			Op:     ops.I64DivS,
 			Args:   []uint64{88, 8},
 			Result: 11,
 		},
 		{
-			Name:   "signed-divide-2",
+			Name:   "I64-signed-divide-2",
 			Op:     ops.I64DivS,
 			Args:   []uint64{-u64Const(80), 8},
 			Result: -u64Const(10),
 		},
 		{
-			Name:   "signed-divide-3",
+			Name:   "I64-signed-divide-3",
 			Op:     ops.I64DivS,
 			Args:   []uint64{-u64Const(80), -u64Const(8)},
 			Result: 10,
 		},
 		{
-			Name:   "signed-remainder-1",
+			Name:   "I64-signed-remainder",
 			Op:     ops.I64RemS,
 			Args:   []uint64{7, 2},
 			Result: 1,
+		},
+		{
+			Name:   "I32-unsigned-divide",
+			Op:     ops.I32DivU,
+			Args:   []uint64{2<<31 - 1, 2},
+			Result: 2<<30 - 1,
+		},
+		{
+			Name:   "I32-signed-divide",
+			Op:     ops.I32DivS,
+			Args:   []uint64{u32ConstNegated(80), 8},
+			Result: u32ConstNegated(10),
+		},
+		{
+			Name:   "I32-unsigned-remainder",
+			Op:     ops.I32RemU,
+			Args:   []uint64{7, 2},
+			Result: 1,
+		},
+		{
+			Name:   "I32-signed-remainder",
+			Op:     ops.I32RemS,
+			Args:   []uint64{u32ConstNegated(8), u32ConstNegated(6)},
+			Result: u32ConstNegated(2),
 		},
 	}
 
@@ -423,7 +447,7 @@ func TestDivOpsI64(t *testing.T) {
 			b.emitPreamble(builder, regs)
 
 			for _, arg := range tc.Args {
-				b.emitPushI64(builder, regs, arg)
+				b.emitPushImmediate(builder, regs, arg)
 			}
 			b.emitDivide(builder, regs, tc.Op)
 			b.emitPostamble(builder, regs)
@@ -569,7 +593,7 @@ func TestComparisonOps64(t *testing.T) {
 			b.emitPreamble(builder, regs)
 
 			for _, arg := range tc.Args {
-				b.emitPushI64(builder, regs, arg)
+				b.emitPushImmediate(builder, regs, arg)
 			}
 			switch tc.Op {
 			case ops.I64Eqz:
@@ -699,6 +723,112 @@ func TestAMD64RHSOptimizations(t *testing.T) {
 	}
 }
 
+func TestAMD64OperationsI32(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.SkipNow()
+	}
+	testCases := []struct {
+		Name   string
+		Op     byte
+		Args   []uint64
+		Result uint64
+	}{
+		{
+			Name:   "add",
+			Op:     ops.I32Add,
+			Args:   []uint64{12, 3},
+			Result: 15,
+		},
+		{
+			Name:   "add-overflow",
+			Op:     ops.I32Add,
+			Args:   []uint64{2<<31 - 1, 2},
+			Result: 1,
+		},
+		{
+			Name:   "subtract",
+			Op:     ops.I32Sub,
+			Args:   []uint64{12, 3},
+			Result: 9,
+		},
+		{
+			Name:   "subtract-overflow",
+			Op:     ops.I32Sub,
+			Args:   []uint64{0, 3},
+			Result: 2<<31 - 3,
+		},
+		{
+			Name:   "and",
+			Op:     ops.I32And,
+			Args:   []uint64{15, 3},
+			Result: 3,
+		},
+		{
+			Name:   "or",
+			Op:     ops.I32Or,
+			Args:   []uint64{1, 2},
+			Result: 3,
+		},
+		{
+			Name:   "xor",
+			Op:     ops.I32Xor,
+			Args:   []uint64{1, 5},
+			Result: 4,
+		},
+		{
+			Name:   "multiply",
+			Op:     ops.I32Mul,
+			Args:   []uint64{5, 5},
+			Result: 25,
+		},
+		{
+			Name:   "multiply-overflow",
+			Op:     ops.I32Mul,
+			Args:   []uint64{2 << 30, 3},
+			Result: 2 << 30,
+		},
+	}
+
+	allocator := &MMapAllocator{}
+	defer allocator.Close()
+	b := &AMD64Backend{}
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			regs := &dirtyRegs{}
+			builder, err := asm.NewBuilder("amd64", 64)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			b.emitPreamble(builder, regs)
+			for _, arg := range tc.Args {
+				b.emitPushImmediate(builder, regs, arg)
+			}
+
+			b.emitBinaryI64(builder, regs, tc.Op)
+			b.emitPostamble(builder, regs)
+			out := builder.Assemble()
+			// debugPrintAsm(out)
+
+			nativeBlock, err := allocator.AllocateExec(out)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			fakeStack := make([]uint64, 0, 5)
+			fakeLocals := make([]uint64, 0, 0)
+			nativeBlock.Invoke(&fakeStack, &fakeLocals)
+
+			if got, want := len(fakeStack), 1; got != want {
+				t.Fatalf("fakeStack.Len = %d, want %d", got, want)
+			}
+			if got, want := fakeStack[0], tc.Result; got != want {
+				t.Errorf("fakeStack[0] = %d, want %d", got, want)
+			}
+		})
+	}
+}
+
 // TestSliceMemoryLayoutAMD64 tests assumptions about the memory layout
 // of slices have not changed. These are not specified in the Go
 // spec.
@@ -724,4 +854,9 @@ func TestSliceMemoryLayoutAMD64(t *testing.T) {
 
 func u64Const(i uint64) uint64 {
 	return i
+}
+
+func u32ConstNegated(i uint32) uint64 {
+	tmp := -i
+	return uint64(tmp)
 }
