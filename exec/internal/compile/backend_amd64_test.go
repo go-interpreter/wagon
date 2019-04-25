@@ -60,7 +60,7 @@ func TestAMD64StackPush(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	b := &AMD64Backend{}
+	b := &AMD64Backend{EmitBoundsChecks: true}
 	regs := &dirtyRegs{}
 	b.emitPreamble(builder, regs)
 	mov := builder.NewProg()
@@ -70,7 +70,7 @@ func TestAMD64StackPush(t *testing.T) {
 	mov.To.Type = obj.TYPE_REG
 	mov.To.Reg = x86.REG_AX
 	builder.AddInstruction(mov)
-	b.emitWasmStackPush(builder, regs, x86.REG_AX)
+	b.emitWasmStackPush(builder, regs, currentInstruction{}, x86.REG_AX)
 	mov = builder.NewProg()
 	mov.As = x86.AMOVQ
 	mov.From.Type = obj.TYPE_CONST
@@ -78,7 +78,7 @@ func TestAMD64StackPush(t *testing.T) {
 	mov.To.Type = obj.TYPE_REG
 	mov.To.Reg = x86.REG_AX
 	builder.AddInstruction(mov)
-	b.emitWasmStackPush(builder, regs, x86.REG_AX)
+	b.emitWasmStackPush(builder, regs, currentInstruction{}, x86.REG_AX)
 
 	b.emitPostamble(builder, regs)
 	out := builder.Assemble()
@@ -92,7 +92,9 @@ func TestAMD64StackPush(t *testing.T) {
 
 	fakeStack := make([]uint64, 3, 5)
 	fakeLocals := make([]uint64, 0, 10)
-	nativeBlock.Invoke(&fakeStack, &fakeLocals)
+	if exitSignal := nativeBlock.Invoke(&fakeStack, &fakeLocals); exitSignal.CompletionStatus() != CompletionOK {
+		t.Fatalf("native execution returned non-ok completion status: %v", exitSignal.CompletionStatus())
+	}
 
 	if got, want := len(fakeStack), 5; got != want {
 		t.Errorf("fakeStack.Len = %d, want %d", got, want)
@@ -120,12 +122,12 @@ func TestAMD64StackPop(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	b := &AMD64Backend{}
+	b := &AMD64Backend{EmitBoundsChecks: true}
 	regs := &dirtyRegs{}
 	b.emitPreamble(builder, regs)
-	b.emitWasmStackLoad(builder, regs, x86.REG_AX)
-	b.emitWasmStackLoad(builder, regs, x86.REG_BX)
-	b.emitWasmStackPush(builder, regs, x86.REG_AX)
+	b.emitWasmStackLoad(builder, regs, currentInstruction{}, x86.REG_AX)
+	b.emitWasmStackLoad(builder, regs, currentInstruction{}, x86.REG_BX)
+	b.emitWasmStackPush(builder, regs, currentInstruction{}, x86.REG_AX)
 	b.emitPostamble(builder, regs)
 	out := builder.Assemble()
 
@@ -137,13 +139,98 @@ func TestAMD64StackPop(t *testing.T) {
 	fakeStack := make([]uint64, 2, 5)
 	fakeStack[1] = 1337
 	fakeLocals := make([]uint64, 0, 0)
-	nativeBlock.Invoke(&fakeStack, &fakeLocals)
+	if exitSignal := nativeBlock.Invoke(&fakeStack, &fakeLocals); exitSignal.CompletionStatus() != CompletionOK {
+		t.Fatalf("native execution returned non-ok completion status: %v", exitSignal.CompletionStatus())
+	}
 
 	if got, want := len(fakeStack), 1; got != want {
 		t.Errorf("fakeStack.Len = %d, want %d", got, want)
 	}
 	if got, want := fakeStack[0], uint64(1337); got != want {
 		t.Errorf("fakeStack[0] = %d, want %d", got, want)
+	}
+}
+
+func TestAMD64ExitSignal(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.SkipNow()
+	}
+	allocator := &MMapAllocator{}
+	defer allocator.Close()
+	builder, err := asm.NewBuilder("amd64", 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	b := &AMD64Backend{EmitBoundsChecks: true}
+	regs := &dirtyRegs{}
+	fakeStack := make([]uint64, 1, 2)
+	fakeLocals := make([]uint64, 2, 2)
+
+	// Test CompletionOK.
+	b.emitPreamble(builder, regs)
+	b.emitPostamble(builder, regs)
+	out := builder.Assemble()
+	nativeBlock, err := allocator.AllocateExec(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := nativeBlock.Invoke(&fakeStack, &fakeLocals)
+	if result.CompletionStatus() != CompletionOK {
+		t.Errorf("Execution returned non-OK completion status: %v", result.CompletionStatus())
+	}
+	if got, want := result.Index(), unknownIndex; got != want {
+		t.Errorf("result.Index() = %v, want %v", got, want)
+	}
+
+	// Test CompletionBadBounds - stack underrun.
+	builder, err = asm.NewBuilder("amd64", 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b = &AMD64Backend{EmitBoundsChecks: true}
+	regs = &dirtyRegs{}
+	fakeStack = make([]uint64, 1, 2)
+	b.emitPreamble(builder, regs)
+	b.emitWasmStackLoad(builder, regs, currentInstruction{idx: 1}, x86.REG_BX)
+	b.emitWasmStackLoad(builder, regs, currentInstruction{idx: 2}, x86.REG_BX)
+	b.emitWasmStackLoad(builder, regs, currentInstruction{idx: 3}, x86.REG_BX)
+	b.emitPostamble(builder, regs)
+	out = builder.Assemble()
+	if nativeBlock, err = allocator.AllocateExec(out); err != nil {
+		t.Fatal(err)
+	}
+	result = nativeBlock.Invoke(&fakeStack, &fakeLocals)
+	if result.CompletionStatus() != CompletionBadBounds {
+		t.Errorf("Execution returned non-BadBounds completion status: %v", result.CompletionStatus())
+	}
+	if got, want := result.Index(), 2; got != want {
+		t.Errorf("result.Index() = %v, want %v", got, want)
+	}
+
+	// Test CompletionBadBounds - stack overrun.
+	builder, err = asm.NewBuilder("amd64", 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b = &AMD64Backend{EmitBoundsChecks: true}
+	regs = &dirtyRegs{}
+	fakeStack = make([]uint64, 0, 2)
+	b.emitPreamble(builder, regs)
+	b.emitWasmStackPush(builder, regs, currentInstruction{idx: 1}, x86.REG_BX)
+	b.emitWasmStackPush(builder, regs, currentInstruction{idx: 2}, x86.REG_BX)
+	b.emitWasmStackPush(builder, regs, currentInstruction{idx: 3}, x86.REG_BX)
+	b.emitPostamble(builder, regs)
+	out = builder.Assemble()
+	if nativeBlock, err = allocator.AllocateExec(out); err != nil {
+		t.Fatal(err)
+	}
+	result = nativeBlock.Invoke(&fakeStack, &fakeLocals)
+	if result.CompletionStatus() != CompletionBadBounds {
+		t.Errorf("Execution returned non-BadBounds completion status: %v", result.CompletionStatus())
+	}
+	if got, want := result.Index(), 3; got != want {
+		t.Errorf("result.Index() = %v, want %v", got, want)
 	}
 }
 
@@ -161,11 +248,11 @@ func TestAMD64LocalsGet(t *testing.T) {
 	b := &AMD64Backend{}
 	regs := &dirtyRegs{}
 	b.emitPreamble(builder, regs)
-	b.emitWasmLocalsLoad(builder, regs, x86.REG_AX, 0)
-	b.emitWasmStackPush(builder, regs, x86.REG_AX)
-	b.emitWasmLocalsLoad(builder, regs, x86.REG_AX, 1)
-	b.emitWasmStackPush(builder, regs, x86.REG_AX)
-	b.emitBinaryI64(builder, regs, ops.I64Add)
+	b.emitWasmLocalsLoad(builder, regs, currentInstruction{}, x86.REG_AX, 0)
+	b.emitWasmStackPush(builder, regs, currentInstruction{}, x86.REG_AX)
+	b.emitWasmLocalsLoad(builder, regs, currentInstruction{}, x86.REG_AX, 1)
+	b.emitWasmStackPush(builder, regs, currentInstruction{}, x86.REG_AX)
+	b.emitBinaryI64(builder, regs, currentInstruction{inst: InstructionMetadata{Op: ops.I64Add}})
 	b.emitPostamble(builder, regs)
 	out := builder.Assemble()
 
@@ -202,12 +289,12 @@ func TestAMD64LocalsSet(t *testing.T) {
 	b := &AMD64Backend{}
 	regs := &dirtyRegs{}
 	b.emitPreamble(builder, regs)
-	b.emitWasmLocalsLoad(builder, regs, x86.REG_AX, 0)
-	b.emitWasmLocalsSave(builder, regs, x86.REG_AX, 1)
-	b.emitWasmLocalsSave(builder, regs, x86.REG_AX, 2)
-	b.emitPushImmediate(builder, regs, 11)
-	b.emitWasmStackLoad(builder, regs, x86.REG_DX)
-	b.emitWasmLocalsSave(builder, regs, x86.REG_DX, 4)
+	b.emitWasmLocalsLoad(builder, regs, currentInstruction{}, x86.REG_AX, 0)
+	b.emitWasmLocalsSave(builder, regs, currentInstruction{}, x86.REG_AX, 1)
+	b.emitWasmLocalsSave(builder, regs, currentInstruction{}, x86.REG_AX, 2)
+	b.emitPushImmediate(builder, regs, currentInstruction{}, 11)
+	b.emitWasmStackLoad(builder, regs, currentInstruction{}, x86.REG_DX)
+	b.emitWasmLocalsSave(builder, regs, currentInstruction{}, x86.REG_DX, 4)
 	b.emitPostamble(builder, regs)
 	out := builder.Assemble()
 
@@ -318,13 +405,13 @@ func TestAMD64OperationsI64(t *testing.T) {
 
 			b.emitPreamble(builder, regs)
 			for _, arg := range tc.Args {
-				b.emitPushImmediate(builder, regs, arg)
+				b.emitPushImmediate(builder, regs, currentInstruction{}, arg)
 			}
 			switch tc.Op {
 			case ops.I64Shl, ops.I64ShrU, ops.I64ShrS:
-				b.emitShiftI64(builder, regs, tc.Op)
+				b.emitShiftI64(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
 			default:
-				b.emitBinaryI64(builder, regs, tc.Op)
+				b.emitBinaryI64(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
 			}
 			b.emitPostamble(builder, regs)
 			out := builder.Assemble()
@@ -447,9 +534,9 @@ func TestDivOps(t *testing.T) {
 			b.emitPreamble(builder, regs)
 
 			for _, arg := range tc.Args {
-				b.emitPushImmediate(builder, regs, arg)
+				b.emitPushImmediate(builder, regs, currentInstruction{}, arg)
 			}
-			b.emitDivide(builder, regs, tc.Op)
+			b.emitDivide(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
 			b.emitPostamble(builder, regs)
 			out := builder.Assemble()
 
@@ -593,13 +680,13 @@ func TestComparisonOps64(t *testing.T) {
 			b.emitPreamble(builder, regs)
 
 			for _, arg := range tc.Args {
-				b.emitPushImmediate(builder, regs, arg)
+				b.emitPushImmediate(builder, regs, currentInstruction{}, arg)
 			}
 			switch tc.Op {
 			case ops.I64Eqz:
-				b.emitUnaryComparison(builder, regs, tc.Op)
+				b.emitUnaryComparison(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
 			default:
-				b.emitComparison(builder, regs, tc.Op)
+				b.emitComparison(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
 			}
 			b.emitPostamble(builder, regs)
 			out := builder.Assemble()
@@ -802,10 +889,10 @@ func TestAMD64OperationsI32(t *testing.T) {
 
 			b.emitPreamble(builder, regs)
 			for _, arg := range tc.Args {
-				b.emitPushImmediate(builder, regs, arg)
+				b.emitPushImmediate(builder, regs, currentInstruction{}, arg)
 			}
 
-			b.emitBinaryI64(builder, regs, tc.Op)
+			b.emitBinaryI64(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
 			b.emitPostamble(builder, regs)
 			out := builder.Assemble()
 			// debugPrintAsm(out)

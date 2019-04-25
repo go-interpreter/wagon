@@ -7,8 +7,8 @@
 #include "funcdata.h"
 #include "textflag.h"
 
-// jitcall(*asm, *stackSlice, *localSlice)
-TEXT ·jitcall(SB),NOSPLIT|NOFRAME,$0-24
+// jitcall(*asm, *stackSlice, *localSlice) uint64
+TEXT ·jitcall(SB),NOSPLIT|NOFRAME,$0-32
         GO_ARGS
         MOVQ asm+0(FP),     AX  // Load the address of the assembly section.
         MOVQ stack+8(FP),   R10 // Load the address of the stack.

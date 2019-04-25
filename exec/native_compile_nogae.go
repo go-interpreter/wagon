@@ -21,7 +21,7 @@ func init() {
 }
 
 func makeAMD64NativeBackend(endianness binary.ByteOrder) *nativeCompiler {
-	be := &compile.AMD64Backend{}
+	be := &compile.AMD64Backend{EmitBoundsChecks: debugStackDepth}
 	return &nativeCompiler{
 		Builder:   be,
 		Scanner:   be.Scanner(),

@@ -12,6 +12,6 @@ type asmBlock struct {
 	mem unsafe.Pointer
 }
 
-func (b *asmBlock) Invoke(stack, locals *[]uint64) {
-	jitcall(unsafe.Pointer(&b.mem), stack, locals)
+func (b *asmBlock) Invoke(stack, locals *[]uint64) JITExitSignal {
+	return JITExitSignal(jitcall(unsafe.Pointer(&b.mem), stack, locals))
 }
