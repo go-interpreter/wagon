@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	minAllocSize = 1024
+	minAllocSize = 1024 * 8 // 8kb executable pages.
 	// alignment - instruction caching works better on aligned boundaries.
 	allocationAlignment = 128 - 1
 )
@@ -42,9 +42,18 @@ func (a *MMapAllocator) Close() error {
 
 // AllocateExec allocates a block of executable memory with the given code contained.
 func (a *MMapAllocator) AllocateExec(asm []byte) (NativeCodeUnit, error) {
-	// TODO: Use free pages where possible.
-	alloc := minAllocSize
 	consumed := uint32(len(asm)+allocationAlignment) & ^uint32(allocationAlignment)
+	if a.last != nil && a.last.remaining > consumed {
+		copy(a.last.mem[a.last.consumed:], asm)
+		out := asmBlock{
+			mem: unsafe.Pointer(&a.last.mem[a.last.consumed]),
+		}
+		a.last.remaining -= consumed
+		a.last.consumed += consumed
+		return &out, nil
+	}
+
+	alloc := minAllocSize
 	if int(consumed) > alloc { // not big enough? make minAlloc + aligned len
 		alloc += int(consumed)
 	}

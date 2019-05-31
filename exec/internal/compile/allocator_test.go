@@ -28,6 +28,16 @@ func TestMMapAllocator(t *testing.T) {
 		t.Errorf("a.last.remaining = %d, want %d", a.last.remaining, want)
 	}
 
+	if _, err := a.AllocateExec([]byte{4, 3, 2, 1}); err != nil {
+		t.Fatal(err)
+	}
+	if want := uint32(256); a.last.consumed != want {
+		t.Errorf("a.last.consumed = %d, want %d", a.last.consumed, want)
+	}
+	if want := uint32(minAllocSize - allocationAlignment*2 - 2); a.last.remaining != want {
+		t.Errorf("a.last.remaining = %d, want %d", a.last.remaining, want)
+	}
+
 	// Test allocation of massive slice - should be 32k more & new block.
 	b := make([]byte, 36*1024)
 	b[1] = 5
