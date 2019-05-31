@@ -9,6 +9,7 @@ package compile
 import (
 	"bytes"
 	"encoding/binary"
+	"math"
 	"runtime"
 	"testing"
 	"unsafe"
@@ -911,6 +912,432 @@ func TestAMD64OperationsI32(t *testing.T) {
 			}
 			if got, want := fakeStack[0], tc.Result; got != want {
 				t.Errorf("fakeStack[0] = %d, want %d", got, want)
+			}
+		})
+	}
+}
+
+func TestAMD64OperationsF64(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.SkipNow()
+	}
+	testCases := []struct {
+		Name   string
+		Op     byte
+		Args   []uint64
+		Result uint64
+	}{
+		{
+			Name:   "add",
+			Op:     ops.F64Add,
+			Args:   []uint64{math.Float64bits(3), math.Float64bits(5)},
+			Result: math.Float64bits(8),
+		},
+		{
+			Name:   "add-negative",
+			Op:     ops.F64Add,
+			Args:   []uint64{math.Float64bits(3), math.Float64bits(-5)},
+			Result: math.Float64bits(-2),
+		},
+		{
+			Name:   "sub",
+			Op:     ops.F64Sub,
+			Args:   []uint64{math.Float64bits(12), math.Float64bits(3)},
+			Result: math.Float64bits(9),
+		},
+		{
+			Name:   "sub-negative",
+			Op:     ops.F64Sub,
+			Args:   []uint64{math.Float64bits(-12.5), math.Float64bits(3)},
+			Result: math.Float64bits(-15.5),
+		},
+		{
+			Name:   "sub-negative-2",
+			Op:     ops.F64Sub,
+			Args:   []uint64{math.Float64bits(12), math.Float64bits(-3)},
+			Result: math.Float64bits(15),
+		},
+		{
+			Name:   "divide-1",
+			Op:     ops.F64Div,
+			Args:   []uint64{math.Float64bits(12), math.Float64bits(3)},
+			Result: math.Float64bits(4),
+		},
+		{
+			Name:   "divide-2",
+			Op:     ops.F64Div,
+			Args:   []uint64{math.Float64bits(1), math.Float64bits(5)},
+			Result: math.Float64bits(0.2),
+		},
+		{
+			Name:   "divide-3",
+			Op:     ops.F64Div,
+			Args:   []uint64{math.Float64bits(-8), math.Float64bits(-2)},
+			Result: math.Float64bits(4),
+		},
+		{
+			Name:   "multiply-1",
+			Op:     ops.F64Mul,
+			Args:   []uint64{math.Float64bits(12), math.Float64bits(3)},
+			Result: math.Float64bits(36),
+		},
+		{
+			Name:   "multiply-2",
+			Op:     ops.F64Mul,
+			Args:   []uint64{math.Float64bits(-0.25), math.Float64bits(5)},
+			Result: math.Float64bits(-1.25),
+		},
+		{
+			Name:   "multiply-3",
+			Op:     ops.F64Mul,
+			Args:   []uint64{math.Float64bits(5000), math.Float64bits(2.5)},
+			Result: math.Float64bits(12500),
+		},
+		{
+			Name:   "min-1",
+			Op:     ops.F64Min,
+			Args:   []uint64{math.Float64bits(5000), math.Float64bits(2.5)},
+			Result: math.Float64bits(2.5),
+		},
+		{
+			Name:   "min-2",
+			Op:     ops.F64Min,
+			Args:   []uint64{math.Float64bits(2.33), math.Float64bits(2.44)},
+			Result: math.Float64bits(2.33),
+		},
+		{
+			Name:   "max-1",
+			Op:     ops.F64Max,
+			Args:   []uint64{math.Float64bits(5000), math.Float64bits(2.5)},
+			Result: math.Float64bits(5000),
+		},
+		{
+			Name:   "max-2",
+			Op:     ops.F64Max,
+			Args:   []uint64{math.Float64bits(2.33), math.Float64bits(2.44)},
+			Result: math.Float64bits(2.44),
+		},
+	}
+
+	allocator := &MMapAllocator{}
+	defer allocator.Close()
+	b := &AMD64Backend{}
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			regs := &dirtyRegs{}
+			builder, err := asm.NewBuilder("amd64", 64)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			b.emitPreamble(builder, regs)
+			for _, arg := range tc.Args {
+				b.emitPushImmediate(builder, regs, currentInstruction{}, arg)
+			}
+
+			b.emitBinaryF64(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
+			b.emitPostamble(builder, regs)
+			out := builder.Assemble()
+			// debugPrintAsm(out)
+
+			nativeBlock, err := allocator.AllocateExec(out)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			fakeStack := make([]uint64, 0, 5)
+			fakeLocals := make([]uint64, 0, 0)
+			nativeBlock.Invoke(&fakeStack, &fakeLocals)
+
+			if got, want := len(fakeStack), 1; got != want {
+				t.Fatalf("fakeStack.Len = %d, want %d", got, want)
+			}
+			if got, want := fakeStack[0], tc.Result; got != want {
+				t.Errorf("fakeStack[0] = %d (%v), want %d", got, math.Float64frombits(got), want)
+			}
+		})
+	}
+}
+
+func TestComparisonOpsF64(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.SkipNow()
+	}
+	testCases := []struct {
+		Name   string
+		Op     byte
+		Args   []uint64
+		Result uint64
+	}{
+		{
+			Name:   "equal-1",
+			Op:     ops.F64Eq,
+			Args:   []uint64{math.Float64bits(2), math.Float64bits(2)},
+			Result: 1,
+		},
+		{
+			Name:   "equal-2",
+			Op:     ops.F64Eq,
+			Args:   []uint64{math.Float64bits(2), math.Float64bits(2.1)},
+			Result: 0,
+		},
+		{
+			Name:   "equal-nan-1",
+			Op:     ops.F64Eq,
+			Args:   []uint64{math.Float64bits(2), math.Float64bits(math.NaN())},
+			Result: 0,
+		},
+		{
+			Name:   "equal-nan-2",
+			Op:     ops.F64Eq,
+			Args:   []uint64{math.Float64bits(math.NaN()), math.Float64bits(math.NaN())},
+			Result: 0,
+		},
+		{
+			Name:   "not-equal-1",
+			Op:     ops.F64Ne,
+			Args:   []uint64{math.Float64bits(2), math.Float64bits(2)},
+			Result: 0,
+		},
+		{
+			Name:   "not-equal-2",
+			Op:     ops.F64Ne,
+			Args:   []uint64{math.Float64bits(2), math.Float64bits(2.1)},
+			Result: 1,
+		},
+		{
+			Name:   "not-equal-nan-1",
+			Op:     ops.F64Ne,
+			Args:   []uint64{math.Float64bits(math.NaN()), math.Float64bits(2.1)},
+			Result: 1,
+		},
+		{
+			Name:   "not-equal-nan-2",
+			Op:     ops.F64Ne,
+			Args:   []uint64{math.Float64bits(2.1), math.Float64bits(math.NaN())},
+			Result: 1,
+		},
+		{
+			Name:   "less-than-1",
+			Op:     ops.F64Lt,
+			Args:   []uint64{math.Float64bits(1), math.Float64bits(2)},
+			Result: 1,
+		},
+		{
+			Name:   "less-than-2",
+			Op:     ops.F64Lt,
+			Args:   []uint64{math.Float64bits(-1.1), math.Float64bits(-1.2)},
+			Result: 0,
+		},
+		{
+			Name:   "less-than-3",
+			Op:     ops.F64Lt,
+			Args:   []uint64{math.Float64bits(-1.2), math.Float64bits(-1.2)},
+			Result: 0,
+		},
+		{
+			Name:   "less-than-nan",
+			Op:     ops.F64Lt,
+			Args:   []uint64{math.Float64bits(-1.2), math.Float64bits(math.NaN())},
+			Result: 0,
+		},
+		{
+			Name:   "greater-than-1",
+			Op:     ops.F64Gt,
+			Args:   []uint64{math.Float64bits(1), math.Float64bits(2)},
+			Result: 0,
+		},
+		{
+			Name:   "greater-than-2",
+			Op:     ops.F64Gt,
+			Args:   []uint64{math.Float64bits(-1.1), math.Float64bits(-1.2)},
+			Result: 1,
+		},
+		{
+			Name:   "greater-than-3",
+			Op:     ops.F64Gt,
+			Args:   []uint64{math.Float64bits(-1.2), math.Float64bits(-1.2)},
+			Result: 0,
+		},
+		{
+			Name:   "less-than-equal-1",
+			Op:     ops.F64Le,
+			Args:   []uint64{math.Float64bits(1), math.Float64bits(2)},
+			Result: 1,
+		},
+		{
+			Name:   "less-than-equal-2",
+			Op:     ops.F64Le,
+			Args:   []uint64{math.Float64bits(-1.1), math.Float64bits(-1.2)},
+			Result: 0,
+		},
+		{
+			Name:   "less-than-equal-3",
+			Op:     ops.F64Le,
+			Args:   []uint64{math.Float64bits(-1.2), math.Float64bits(-1.2)},
+			Result: 1,
+		},
+		{
+			Name:   "greater-than-equal-1",
+			Op:     ops.F64Ge,
+			Args:   []uint64{math.Float64bits(1), math.Float64bits(2)},
+			Result: 0,
+		},
+		{
+			Name:   "greater-than-equal-2",
+			Op:     ops.F64Ge,
+			Args:   []uint64{math.Float64bits(-1.1), math.Float64bits(-1.2)},
+			Result: 1,
+		},
+		{
+			Name:   "greater-than-equal-3",
+			Op:     ops.F64Ge,
+			Args:   []uint64{math.Float64bits(-1.2), math.Float64bits(-1.2)},
+			Result: 1,
+		},
+		{
+			Name:   "greater-than-equal-4",
+			Op:     ops.F64Ge,
+			Args:   []uint64{math.Float64bits(2), math.Float64bits(-1)},
+			Result: 1,
+		},
+	}
+
+	allocator := &MMapAllocator{}
+	defer allocator.Close()
+	b := &AMD64Backend{}
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			regs := &dirtyRegs{}
+			builder, err := asm.NewBuilder("amd64", 64)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b.emitPreamble(builder, regs)
+
+			for _, arg := range tc.Args {
+				b.emitPushImmediate(builder, regs, currentInstruction{}, arg)
+			}
+
+			b.emitComparisonFloat(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
+			b.emitPostamble(builder, regs)
+			out := builder.Assemble()
+			// debugPrintAsm(out)
+
+			nativeBlock, err := allocator.AllocateExec(out)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			fakeStack := make([]uint64, 0, 5)
+			fakeLocals := make([]uint64, 0, 0)
+			nativeBlock.Invoke(&fakeStack, &fakeLocals)
+
+			if got, want := len(fakeStack), 1; got != want {
+				t.Fatalf("fakeStack.Len = %d, want %d", got, want)
+			}
+			if got, want := fakeStack[0], tc.Result; got != want {
+				t.Errorf("fakeStack[0] = %d, want %d", got, want)
+			}
+		})
+	}
+}
+
+func TestAMD64IntToFloat(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.SkipNow()
+	}
+	testCases := []struct {
+		Name   string
+		Op     byte
+		Args   []uint64
+		Result uint64
+	}{
+		{
+			Name:   "u64-to-f64",
+			Op:     ops.F64ConvertUI64,
+			Args:   []uint64{22},
+			Result: math.Float64bits(22),
+		},
+		{
+			Name:   "s64-to-f64",
+			Op:     ops.F64ConvertUI64,
+			Args:   []uint64{-u64Const(80)},
+			Result: math.Float64bits(-80),
+		},
+		{
+			Name:   "u32-to-f64",
+			Op:     ops.F64ConvertUI32,
+			Args:   []uint64{22},
+			Result: math.Float64bits(22),
+		},
+		{
+			Name:   "s32-to-f64",
+			Op:     ops.F64ConvertUI32,
+			Args:   []uint64{u32ConstNegated(80)},
+			Result: math.Float64bits(-80),
+		},
+		{
+			Name:   "u64-to-f32",
+			Op:     ops.F32ConvertUI64,
+			Args:   []uint64{22},
+			Result: uint64(math.Float32bits(22)),
+		},
+		{
+			Name:   "s64-to-f32",
+			Op:     ops.F32ConvertSI64,
+			Args:   []uint64{-u64Const(80)},
+			Result: uint64(math.Float32bits(-80)),
+		},
+		{
+			Name:   "u32-to-f32",
+			Op:     ops.F32ConvertUI32,
+			Args:   []uint64{22},
+			Result: uint64(math.Float32bits(22)),
+		},
+		{
+			Name:   "s32-to-f32",
+			Op:     ops.F32ConvertSI32,
+			Args:   []uint64{u32ConstNegated(80)},
+			Result: uint64(math.Float32bits(-80)),
+		},
+	}
+
+	allocator := &MMapAllocator{}
+	defer allocator.Close()
+	b := &AMD64Backend{}
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			regs := &dirtyRegs{}
+			builder, err := asm.NewBuilder("amd64", 64)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			b.emitPreamble(builder, regs)
+			for _, arg := range tc.Args {
+				b.emitPushImmediate(builder, regs, currentInstruction{}, arg)
+			}
+
+			b.emitConvertIntToFloat(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
+			b.emitPostamble(builder, regs)
+			out := builder.Assemble()
+			// debugPrintAsm(out)
+
+			nativeBlock, err := allocator.AllocateExec(out)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			fakeStack := make([]uint64, 0, 5)
+			fakeLocals := make([]uint64, 0, 0)
+			nativeBlock.Invoke(&fakeStack, &fakeLocals)
+
+			if got, want := len(fakeStack), 1; got != want {
+				t.Fatalf("fakeStack.Len = %d, want %d", got, want)
+			}
+			if got, want := fakeStack[0], tc.Result; got != want {
+				t.Errorf("fakeStack[0] = %d (%v), want %d", got, math.Float64frombits(got), want)
 			}
 		})
 	}

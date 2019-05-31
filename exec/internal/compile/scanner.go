@@ -110,6 +110,18 @@ func (s *scanner) ScanFunc(bytecode []byte, meta *BytecodeMetadata) ([]Compilati
 			inProgress.Metrics.IntegerOps++
 			inProgress.Metrics.StackReads += 2
 			inProgress.Metrics.StackWrites++
+
+		case ops.F64Add, ops.F64Sub, ops.F64Div, ops.F64Mul, ops.F64Min, ops.F64Max,
+			ops.F64Eq, ops.F64Ne, ops.F64Lt, ops.F64Gt, ops.F64Le, ops.F64Ge:
+			inProgress.Metrics.FloatOps++
+			inProgress.Metrics.StackReads += 2
+			inProgress.Metrics.StackWrites++
+
+		case ops.F64ConvertUI64, ops.F64ConvertSI64, ops.F32ConvertUI64, ops.F32ConvertSI64,
+			ops.F64ConvertUI32, ops.F64ConvertSI32, ops.F32ConvertUI32, ops.F32ConvertSI32:
+			inProgress.Metrics.FloatOps++
+			inProgress.Metrics.StackReads++
+			inProgress.Metrics.StackWrites++
 		}
 		inProgress.Metrics.AllOps++
 	}

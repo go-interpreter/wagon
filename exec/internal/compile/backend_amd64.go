@@ -94,40 +94,60 @@ func (b *AMD64Backend) Scanner() *scanner {
 	if b.s == nil {
 		b.s = &scanner{
 			supportedOpcodes: map[byte]bool{
-				ops.I64Const: true,
-				ops.I32Const: true,
-				ops.I64Add:   true,
-				ops.I32Add:   true,
-				ops.I64Sub:   true,
-				ops.I32Sub:   true,
-				ops.I64And:   true,
-				ops.I32And:   true,
-				ops.I64Or:    true,
-				ops.I32Or:    true,
-				ops.I64Xor:   true,
-				ops.I32Xor:   true,
-				ops.I64Mul:   true,
-				ops.I32Mul:   true,
-				ops.I64DivU:  true,
-				ops.I32DivU:  true,
-				ops.I64DivS:  true,
-				ops.I32DivS:  true,
-				ops.I64RemU:  true,
-				ops.I32RemU:  true,
-				ops.I64RemS:  true,
-				ops.I32RemS:  true,
-				ops.GetLocal: true,
-				ops.SetLocal: true,
-				ops.I64Shl:   true,
-				ops.I64ShrU:  true,
-				ops.I64ShrS:  true,
-				ops.I64Eq:    true,
-				ops.I64Ne:    true,
-				ops.I64LtU:   true,
-				ops.I64GtU:   true,
-				ops.I64LeU:   true,
-				ops.I64GeU:   true,
-				ops.I64Eqz:   true,
+				ops.I64Const:       true,
+				ops.I32Const:       true,
+				ops.I64Add:         true,
+				ops.I32Add:         true,
+				ops.I64Sub:         true,
+				ops.I32Sub:         true,
+				ops.I64And:         true,
+				ops.I32And:         true,
+				ops.I64Or:          true,
+				ops.I32Or:          true,
+				ops.I64Xor:         true,
+				ops.I32Xor:         true,
+				ops.I64Mul:         true,
+				ops.I32Mul:         true,
+				ops.I64DivU:        true,
+				ops.I32DivU:        true,
+				ops.I64DivS:        true,
+				ops.I32DivS:        true,
+				ops.I64RemU:        true,
+				ops.I32RemU:        true,
+				ops.I64RemS:        true,
+				ops.I32RemS:        true,
+				ops.GetLocal:       true,
+				ops.SetLocal:       true,
+				ops.I64Shl:         true,
+				ops.I64ShrU:        true,
+				ops.I64ShrS:        true,
+				ops.I64Eq:          true,
+				ops.I64Ne:          true,
+				ops.I64LtU:         true,
+				ops.I64GtU:         true,
+				ops.I64LeU:         true,
+				ops.I64GeU:         true,
+				ops.I64Eqz:         true,
+				ops.F64Add:         true,
+				ops.F64Sub:         true,
+				ops.F64Div:         true,
+				ops.F64Mul:         true,
+				ops.F64Min:         true,
+				ops.F64Max:         true,
+				ops.F64Eq:          true,
+				ops.F64Ne:          true,
+				ops.F64Lt:          true,
+				ops.F64Gt:          true,
+				ops.F64Le:          true,
+				ops.F64Ge:          true,
+				ops.F64ConvertUI64: true,
+				ops.F64ConvertSI64: true,
+				ops.F32ConvertUI64: true,
+				ops.F32ConvertSI64: true,
+				ops.F64ConvertUI32: true,
+				ops.F64ConvertSI32: true,
+				ops.F32ConvertUI32: true,
+				ops.F32ConvertSI32: true,
 			},
 		}
 	}
@@ -206,6 +226,20 @@ func (b *AMD64Backend) Build(candidate CompilationCandidate, code []byte, meta *
 		case ops.I64Eqz:
 			if err := b.emitUnaryComparison(builder, &regs, ci); err != nil {
 				return nil, fmt.Errorf("compile: amd64.emitUnaryComparison: %v", err)
+			}
+		case ops.F64Add, ops.F64Sub, ops.F64Div, ops.F64Mul, ops.F64Min, ops.F64Max:
+			if err := b.emitBinaryF64(builder, &regs, ci); err != nil {
+				return nil, fmt.Errorf("compile: amd64.emitBinaryF64: %v", err)
+			}
+		case ops.F64Eq, ops.F64Ne, ops.F64Lt, ops.F64Gt, ops.F64Le, ops.F64Ge:
+			if err := b.emitComparisonFloat(builder, &regs, ci); err != nil {
+				return nil, fmt.Errorf("compile: amd64.emitComparisonFloat: %v", err)
+			}
+
+		case ops.F64ConvertUI64, ops.F64ConvertSI64, ops.F32ConvertUI64, ops.F32ConvertSI64,
+			ops.F64ConvertUI32, ops.F64ConvertSI32, ops.F32ConvertUI32, ops.F32ConvertSI32:
+			if err := b.emitConvertIntToFloat(builder, &regs, ci); err != nil {
+				return nil, fmt.Errorf("compile: amd64.emitConvertIntToFloat: %v", err)
 			}
 		default:
 			return nil, fmt.Errorf("compile: amd64 backend cannot handle inst[%d].Op 0x%x", i, inst.Op)
@@ -544,6 +578,127 @@ func (b *AMD64Backend) emitBinaryI64(builder *asm.Builder, regs *dirtyRegs, ci c
 	return nil
 }
 
+func (b *AMD64Backend) emitBinaryF64(builder *asm.Builder, regs *dirtyRegs, ci currentInstruction) error {
+	b.emitWasmStackLoad(builder, regs, ci, x86.REG_X1)
+	b.emitWasmStackLoad(builder, regs, ci, x86.REG_X0)
+
+	prog := builder.NewProg()
+	prog.From.Type = obj.TYPE_REG
+	prog.From.Reg = x86.REG_X1
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_X0
+	switch ci.inst.Op {
+	case ops.F64Add:
+		prog.As = x86.AADDSD
+	case ops.F64Sub:
+		prog.As = x86.ASUBSD
+	case ops.F64Div:
+		prog.As = x86.ADIVSD
+	case ops.F64Mul:
+		prog.As = x86.AMULSD
+	case ops.F64Min:
+		prog.As = x86.AMINSD
+	case ops.F64Max:
+		prog.As = x86.AMAXSD
+	default:
+		return fmt.Errorf("cannot handle op: %x", ci.inst.Op)
+	}
+	builder.AddInstruction(prog)
+
+	b.emitWasmStackPush(builder, regs, ci, x86.REG_X0)
+	return nil
+}
+
+func (b *AMD64Backend) emitComparisonFloat(builder *asm.Builder, regs *dirtyRegs, ci currentInstruction) error {
+	// xor rax, rax
+	// XOR is used as that is the fastest way to zero a register,
+	// and takes a single cycle on every generation since Pentium.
+	prog := builder.NewProg()
+	prog.As = x86.AXORQ
+	prog.From.Type = obj.TYPE_REG
+	prog.From.Reg = x86.REG_AX
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_AX
+	builder.AddInstruction(prog)
+
+	b.emitWasmStackLoad(builder, regs, ci, x86.REG_X1)
+	b.emitWasmStackLoad(builder, regs, ci, x86.REG_X0)
+
+	// COMISD xmm0, xmm1
+	prog = builder.NewProg()
+	prog.From.Type = obj.TYPE_REG
+	prog.From.Reg = x86.REG_X1
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_X0
+	prog.As = x86.ACOMISD
+	builder.AddInstruction(prog)
+
+	// To handle the case where an operand is NaN, we check the parity
+	// bit and jump accordingly.
+	jmpNaN := builder.NewProg()
+	jmpNaN.As = x86.AJPS // jump parity set. Parity is set for NaN computations.
+	jmpNaN.To.Type = obj.TYPE_BRANCH
+	builder.AddInstruction(jmpNaN)
+
+	// setXX al
+	// A set is used instead of conditional moves or branches, as it is the
+	// shortest instruction with the least impact on the branch predictor/cache.
+	prog = builder.NewProg()
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_AX
+	switch ci.inst.Op {
+	case ops.F64Eq:
+		prog.As = x86.ASETEQ
+	case ops.F64Ne:
+		prog.As = x86.ASETNE
+	case ops.F64Lt:
+		prog.As = x86.ASETCS // SETA
+	case ops.F64Gt:
+		prog.As = x86.ASETHI // SETB
+	case ops.F64Le:
+		prog.As = x86.ASETLS // SETBE
+	case ops.F64Ge:
+		prog.As = x86.ASETCC // SETAE
+	default:
+		return fmt.Errorf("cannot handle op: %x", ci.inst.Op)
+	}
+	builder.AddInstruction(prog)
+
+	// If we got here, the output is not NaN, so
+	// skip over code which sets the result for NaN values.
+	jmp := builder.NewProg()
+	jmp.As = obj.AJMP // jump parity set. Parity is set for NaN computations.
+	jmp.To.Type = obj.TYPE_BRANCH
+	builder.AddInstruction(jmp)
+
+	// mov rax, $val - should only be jmp'ed to if the value is NaN.
+	writeNaNVal := builder.NewProg()
+	writeNaNVal.From.Type = obj.TYPE_CONST
+	switch ci.inst.Op {
+	case ops.F64Ne:
+		writeNaNVal.From.Offset = 1 // NaN != dontcare results in True
+	default:
+		writeNaNVal.From.Offset = 0 // All other ops result in False
+	}
+	writeNaNVal.To.Type = obj.TYPE_REG
+	writeNaNVal.To.Reg = x86.REG_AX
+	writeNaNVal.As = x86.AMOVQ
+	jmpNaN.Pcond = writeNaNVal
+	builder.AddInstruction(writeNaNVal)
+
+	// Symbolic instruction so the not-NaN case can avoid being
+	// overwritten. Normal flow (!NaN) results in a jump to here.
+	// The assembler will optimize this pseudo-instruction so as
+	// to not emit a NOP.
+	branchEnd := builder.NewProg()
+	branchEnd.As = obj.ANOP
+	jmp.Pcond = branchEnd
+	builder.AddInstruction(branchEnd)
+
+	b.emitWasmStackPush(builder, regs, ci, x86.REG_AX)
+	return nil
+}
+
 func (b *AMD64Backend) emitRHSConstOptimizedInstruction(builder *asm.Builder, regs *dirtyRegs, ci currentInstruction, immediate uint64) error {
 	b.emitWasmStackLoad(builder, regs, ci, x86.REG_AX)
 
@@ -592,6 +747,32 @@ func (b *AMD64Backend) emitShiftI64(builder *asm.Builder, regs *dirtyRegs, ci cu
 	builder.AddInstruction(prog)
 
 	b.emitWasmStackPush(builder, regs, ci, x86.REG_AX)
+	return nil
+}
+
+func (b *AMD64Backend) emitConvertIntToFloat(builder *asm.Builder, regs *dirtyRegs, ci currentInstruction) error {
+	b.emitWasmStackLoad(builder, regs, ci, x86.REG_AX)
+
+	prog := builder.NewProg()
+	prog.From.Type = obj.TYPE_REG
+	prog.From.Reg = x86.REG_AX
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_X0
+	switch ci.inst.Op {
+	case ops.F64ConvertUI64, ops.F64ConvertSI64:
+		prog.As = x86.ACVTSQ2SD
+	case ops.F32ConvertUI64, ops.F32ConvertSI64:
+		prog.As = x86.ACVTSQ2SS
+	case ops.F64ConvertUI32, ops.F64ConvertSI32:
+		prog.As = x86.ACVTSL2SD
+	case ops.F32ConvertUI32, ops.F32ConvertSI32:
+		prog.As = x86.ACVTSL2SS
+	default:
+		return fmt.Errorf("cannot handle op: %x", ci.inst.Op)
+	}
+	builder.AddInstruction(prog)
+
+	b.emitWasmStackPush(builder, regs, ci, x86.REG_X0)
 	return nil
 }
 
