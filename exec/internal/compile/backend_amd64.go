@@ -94,64 +94,93 @@ func (b *AMD64Backend) Scanner() *scanner {
 	if b.s == nil {
 		b.s = &scanner{
 			supportedOpcodes: map[byte]bool{
-				ops.I64Const:       true,
-				ops.I32Const:       true,
-				ops.I64Add:         true,
-				ops.I32Add:         true,
-				ops.I64Sub:         true,
-				ops.I32Sub:         true,
-				ops.I64And:         true,
-				ops.I32And:         true,
-				ops.I64Or:          true,
-				ops.I32Or:          true,
-				ops.I64Xor:         true,
-				ops.I32Xor:         true,
-				ops.I64Mul:         true,
-				ops.I32Mul:         true,
-				ops.I64DivU:        true,
-				ops.I32DivU:        true,
-				ops.I64DivS:        true,
-				ops.I32DivS:        true,
-				ops.I64RemU:        true,
-				ops.I32RemU:        true,
-				ops.I64RemS:        true,
-				ops.I32RemS:        true,
-				ops.GetLocal:       true,
-				ops.SetLocal:       true,
-				ops.I64Shl:         true,
-				ops.I64ShrU:        true,
-				ops.I64ShrS:        true,
-				ops.I64Eq:          true,
-				ops.I64Ne:          true,
-				ops.I64LtU:         true,
-				ops.I64GtU:         true,
-				ops.I64LeU:         true,
-				ops.I64GeU:         true,
-				ops.I64Eqz:         true,
-				ops.F64Add:         true,
-				ops.F64Sub:         true,
-				ops.F64Div:         true,
-				ops.F64Mul:         true,
-				ops.F64Min:         true,
-				ops.F64Max:         true,
-				ops.F64Eq:          true,
-				ops.F64Ne:          true,
-				ops.F64Lt:          true,
-				ops.F64Gt:          true,
-				ops.F64Le:          true,
-				ops.F64Ge:          true,
-				ops.F64ConvertUI64: true,
-				ops.F64ConvertSI64: true,
-				ops.F32ConvertUI64: true,
-				ops.F32ConvertSI64: true,
-				ops.F64ConvertUI32: true,
-				ops.F64ConvertSI32: true,
-				ops.F32ConvertUI32: true,
-				ops.F32ConvertSI32: true,
+				ops.Drop:              true,
+				ops.Select:            true,
+				ops.I64Const:          true,
+				ops.I32Const:          true,
+				ops.F64Const:          true,
+				ops.F32Const:          true,
+				ops.I64Add:            true,
+				ops.I32Add:            true,
+				ops.I64Sub:            true,
+				ops.I32Sub:            true,
+				ops.I64And:            true,
+				ops.I32And:            true,
+				ops.I64Or:             true,
+				ops.I32Or:             true,
+				ops.I64Xor:            true,
+				ops.I32Xor:            true,
+				ops.I64Mul:            true,
+				ops.I32Mul:            true,
+				ops.I64DivU:           true,
+				ops.I32DivU:           true,
+				ops.I64DivS:           true,
+				ops.I32DivS:           true,
+				ops.I64RemU:           true,
+				ops.I32RemU:           true,
+				ops.I64RemS:           true,
+				ops.I32RemS:           true,
+				ops.GetLocal:          true,
+				ops.SetLocal:          true,
+				ops.I64Shl:            true,
+				ops.I64ShrU:           true,
+				ops.I64ShrS:           true,
+				ops.I64Eq:             true,
+				ops.I64Ne:             true,
+				ops.I64LtU:            true,
+				ops.I64GtU:            true,
+				ops.I64LeU:            true,
+				ops.I64GeU:            true,
+				ops.I64Eqz:            true,
+				ops.F64Add:            true,
+				ops.F32Add:            true,
+				ops.F64Sub:            true,
+				ops.F32Sub:            true,
+				ops.F64Div:            true,
+				ops.F32Div:            true,
+				ops.F64Mul:            true,
+				ops.F32Mul:            true,
+				ops.F64Min:            true,
+				ops.F32Min:            true,
+				ops.F64Max:            true,
+				ops.F32Max:            true,
+				ops.F64Eq:             true,
+				ops.F32Eq:             true,
+				ops.F64Ne:             true,
+				ops.F32Ne:             true,
+				ops.F64Lt:             true,
+				ops.F32Lt:             true,
+				ops.F64Gt:             true,
+				ops.F32Gt:             true,
+				ops.F64Le:             true,
+				ops.F32Le:             true,
+				ops.F64Ge:             true,
+				ops.F32Ge:             true,
+				ops.F64ConvertUI64:    true,
+				ops.F64ConvertSI64:    true,
+				ops.F32ConvertUI64:    true,
+				ops.F32ConvertSI64:    true,
+				ops.F64ConvertUI32:    true,
+				ops.F64ConvertSI32:    true,
+				ops.F32ConvertUI32:    true,
+				ops.F32ConvertSI32:    true,
+				ops.F64ReinterpretI64: true,
+				ops.F32ReinterpretI32: true,
+				ops.I64ReinterpretF64: true,
+				ops.I32ReinterpretF32: true,
 			},
 		}
 	}
 	return b.s
+}
+
+func constOp(op byte) bool {
+	switch op {
+	case ops.I64Const, ops.I32Const, ops.F64Const, ops.F32Const:
+		return true
+	default:
+		return false
+	}
 }
 
 // Build implements exec.instructionBuilder.
@@ -173,7 +202,7 @@ func (b *AMD64Backend) Build(candidate CompilationCandidate, code []byte, meta *
 
 		// Optimization: Const followed by binary instruction: sometimes can be
 		// reduced to a single operation.
-		if (inst.Op == ops.I64Const || inst.Op == ops.I32Const) && (i+1) < candidate.EndInstruction {
+		if constOp(inst.Op) && (i+1) < candidate.EndInstruction {
 			imm := b.readIntImmediate(code, inst)
 			nextInst := meta.Instructions[i+1]
 			nextCI := currentInstruction{idx: i + 1, inst: nextInst}
@@ -200,7 +229,7 @@ func (b *AMD64Backend) Build(candidate CompilationCandidate, code []byte, meta *
 		}
 
 		switch inst.Op {
-		case ops.I64Const, ops.I32Const:
+		case ops.I64Const, ops.I32Const, ops.F64Const, ops.F32Const:
 			b.emitPushImmediate(builder, &regs, ci, b.readIntImmediate(code, inst))
 		case ops.GetLocal:
 			b.emitWasmLocalsLoad(builder, &regs, ci, x86.REG_AX, b.readIntImmediate(code, inst))
@@ -227,11 +256,13 @@ func (b *AMD64Backend) Build(candidate CompilationCandidate, code []byte, meta *
 			if err := b.emitUnaryComparison(builder, &regs, ci); err != nil {
 				return nil, fmt.Errorf("compile: amd64.emitUnaryComparison: %v", err)
 			}
-		case ops.F64Add, ops.F64Sub, ops.F64Div, ops.F64Mul, ops.F64Min, ops.F64Max:
-			if err := b.emitBinaryF64(builder, &regs, ci); err != nil {
-				return nil, fmt.Errorf("compile: amd64.emitBinaryF64: %v", err)
+		case ops.F64Add, ops.F32Add, ops.F64Sub, ops.F32Sub, ops.F64Div, ops.F32Div, ops.F64Mul, ops.F32Mul,
+			ops.F64Min, ops.F32Min, ops.F64Max, ops.F32Max:
+			if err := b.emitBinaryFloat(builder, &regs, ci); err != nil {
+				return nil, fmt.Errorf("compile: amd64.emitBinaryFloat: %v", err)
 			}
-		case ops.F64Eq, ops.F64Ne, ops.F64Lt, ops.F64Gt, ops.F64Le, ops.F64Ge:
+		case ops.F64Eq, ops.F64Ne, ops.F64Lt, ops.F64Gt, ops.F64Le, ops.F64Ge,
+			ops.F32Eq, ops.F32Ne, ops.F32Lt, ops.F32Gt, ops.F32Le, ops.F32Ge:
 			if err := b.emitComparisonFloat(builder, &regs, ci); err != nil {
 				return nil, fmt.Errorf("compile: amd64.emitComparisonFloat: %v", err)
 			}
@@ -241,6 +272,18 @@ func (b *AMD64Backend) Build(candidate CompilationCandidate, code []byte, meta *
 			if err := b.emitConvertIntToFloat(builder, &regs, ci); err != nil {
 				return nil, fmt.Errorf("compile: amd64.emitConvertIntToFloat: %v", err)
 			}
+
+		case ops.Drop:
+			b.emitWasmStackLoad(builder, &regs, ci, x86.REG_AX)
+		case ops.Select:
+			if err := b.emitSelect(builder, &regs, ci); err != nil {
+				return nil, fmt.Errorf("compile: amd64.emitSelect: %v", err)
+			}
+
+			// Reinterpret opcodes symbolize type transformations without any actual
+			// changes to data on the stack. As such, we treat them as a no-op.
+		case ops.F64ReinterpretI64, ops.F32ReinterpretI32, ops.I64ReinterpretF64, ops.I32ReinterpretF32:
+
 		default:
 			return nil, fmt.Errorf("compile: amd64 backend cannot handle inst[%d].Op 0x%x", i, inst.Op)
 		}
@@ -578,7 +621,7 @@ func (b *AMD64Backend) emitBinaryI64(builder *asm.Builder, regs *dirtyRegs, ci c
 	return nil
 }
 
-func (b *AMD64Backend) emitBinaryF64(builder *asm.Builder, regs *dirtyRegs, ci currentInstruction) error {
+func (b *AMD64Backend) emitBinaryFloat(builder *asm.Builder, regs *dirtyRegs, ci currentInstruction) error {
 	b.emitWasmStackLoad(builder, regs, ci, x86.REG_X1)
 	b.emitWasmStackLoad(builder, regs, ci, x86.REG_X0)
 
@@ -590,16 +633,28 @@ func (b *AMD64Backend) emitBinaryF64(builder *asm.Builder, regs *dirtyRegs, ci c
 	switch ci.inst.Op {
 	case ops.F64Add:
 		prog.As = x86.AADDSD
+	case ops.F32Add:
+		prog.As = x86.AADDSS
 	case ops.F64Sub:
 		prog.As = x86.ASUBSD
+	case ops.F32Sub:
+		prog.As = x86.ASUBSS
 	case ops.F64Div:
 		prog.As = x86.ADIVSD
+	case ops.F32Div:
+		prog.As = x86.ADIVSS
 	case ops.F64Mul:
 		prog.As = x86.AMULSD
+	case ops.F32Mul:
+		prog.As = x86.AMULSS
 	case ops.F64Min:
 		prog.As = x86.AMINSD
+	case ops.F32Min:
+		prog.As = x86.AMINSS
 	case ops.F64Max:
 		prog.As = x86.AMAXSD
+	case ops.F32Max:
+		prog.As = x86.AMAXSS
 	default:
 		return fmt.Errorf("cannot handle op: %x", ci.inst.Op)
 	}
@@ -624,13 +679,21 @@ func (b *AMD64Backend) emitComparisonFloat(builder *asm.Builder, regs *dirtyRegs
 	b.emitWasmStackLoad(builder, regs, ci, x86.REG_X1)
 	b.emitWasmStackLoad(builder, regs, ci, x86.REG_X0)
 
-	// COMISD xmm0, xmm1
+	// COMISD/COMISS xmm0, xmm1
 	prog = builder.NewProg()
 	prog.From.Type = obj.TYPE_REG
 	prog.From.Reg = x86.REG_X1
 	prog.To.Type = obj.TYPE_REG
 	prog.To.Reg = x86.REG_X0
-	prog.As = x86.ACOMISD
+	switch ci.inst.Op {
+	case ops.F64Eq, ops.F64Ne, ops.F64Lt, ops.F64Gt, ops.F64Le, ops.F64Ge:
+		prog.As = x86.ACOMISD
+	case ops.F32Eq, ops.F32Ne, ops.F32Lt, ops.F32Gt, ops.F32Le, ops.F32Ge:
+		prog.As = x86.ACOMISS
+	default:
+		return fmt.Errorf("cannot handle op: %x", ci.inst.Op)
+	}
+
 	builder.AddInstruction(prog)
 
 	// To handle the case where an operand is NaN, we check the parity
@@ -647,17 +710,17 @@ func (b *AMD64Backend) emitComparisonFloat(builder *asm.Builder, regs *dirtyRegs
 	prog.To.Type = obj.TYPE_REG
 	prog.To.Reg = x86.REG_AX
 	switch ci.inst.Op {
-	case ops.F64Eq:
+	case ops.F64Eq, ops.F32Eq:
 		prog.As = x86.ASETEQ
-	case ops.F64Ne:
+	case ops.F64Ne, ops.F32Ne:
 		prog.As = x86.ASETNE
-	case ops.F64Lt:
+	case ops.F64Lt, ops.F32Lt:
 		prog.As = x86.ASETCS // SETA
-	case ops.F64Gt:
+	case ops.F64Gt, ops.F32Gt:
 		prog.As = x86.ASETHI // SETB
-	case ops.F64Le:
+	case ops.F64Le, ops.F32Le:
 		prog.As = x86.ASETLS // SETBE
-	case ops.F64Ge:
+	case ops.F64Ge, ops.F32Ge:
 		prog.As = x86.ASETCC // SETAE
 	default:
 		return fmt.Errorf("cannot handle op: %x", ci.inst.Op)
@@ -675,7 +738,7 @@ func (b *AMD64Backend) emitComparisonFloat(builder *asm.Builder, regs *dirtyRegs
 	writeNaNVal := builder.NewProg()
 	writeNaNVal.From.Type = obj.TYPE_CONST
 	switch ci.inst.Op {
-	case ops.F64Ne:
+	case ops.F64Ne, ops.F32Ne:
 		writeNaNVal.From.Offset = 1 // NaN != dontcare results in True
 	default:
 		writeNaNVal.From.Offset = 0 // All other ops result in False
@@ -918,6 +981,43 @@ func (b *AMD64Backend) emitUnaryComparison(builder *asm.Builder, regs *dirtyRegs
 	builder.AddInstruction(prog)
 
 	b.emitWasmStackPush(builder, regs, ci, x86.REG_AX)
+	return nil
+}
+
+func (b *AMD64Backend) emitSelect(builder *asm.Builder, regs *dirtyRegs, ci currentInstruction) error {
+	b.emitWasmStackLoad(builder, regs, ci, x86.REG_R9)
+	b.emitWasmStackLoad(builder, regs, ci, x86.REG_AX)
+	b.emitWasmStackLoad(builder, regs, ci, x86.REG_BX)
+
+	prog := builder.NewProg()
+	prog.As = x86.ATESTQ
+	prog.From.Type = obj.TYPE_REG
+	prog.From.Reg = x86.REG_R9
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_R9
+	builder.AddInstruction(prog)
+
+	cond := builder.NewProg()
+	cond.As = x86.AJEQ
+	cond.To.Type = obj.TYPE_BRANCH
+	builder.AddInstruction(cond)
+
+	b.emitWasmStackPush(builder, regs, ci, x86.REG_BX)
+	jmp := builder.NewProg()
+	jmp.As = obj.AJMP
+	jmp.To.Type = obj.TYPE_BRANCH
+	builder.AddInstruction(jmp)
+
+	val2 := builder.NewProg()
+	val2.As = obj.ANOP // branch target - assembler will optimize out.
+	cond.Pcond = val2
+	builder.AddInstruction(val2)
+	b.emitWasmStackPush(builder, regs, ci, x86.REG_AX)
+
+	end := builder.NewProg()
+	end.As = obj.ANOP // branch target - assembler will optimize out.
+	jmp.Pcond = end
+	builder.AddInstruction(end)
 	return nil
 }
 

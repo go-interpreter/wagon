@@ -321,6 +321,44 @@ func TestAMD64LocalsSet(t *testing.T) {
 	}
 }
 
+func TestAMD64Select(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.SkipNow()
+	}
+	allocator := &MMapAllocator{}
+	defer allocator.Close()
+	builder, err := asm.NewBuilder("amd64", 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	b := &AMD64Backend{}
+	regs := &dirtyRegs{}
+	b.emitPreamble(builder, regs)
+	b.emitSelect(builder, regs, currentInstruction{})
+	b.emitPostamble(builder, regs)
+	out := builder.Assemble()
+
+	nativeBlock, err := allocator.AllocateExec(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fakeStack := make([]uint64, 3, 5)
+	fakeLocals := make([]uint64, 0, 5)
+	fakeStack[0] = 11
+	fakeStack[1] = 2
+	fakeStack[2] = 0
+	nativeBlock.Invoke(&fakeStack, &fakeLocals)
+
+	if got, want := len(fakeStack), 1; got != want {
+		t.Errorf("fakeStack.Len = %d, want %d", got, want)
+	}
+	if got, want := fakeStack[0], uint64(2); got != want {
+		t.Errorf("fakeStack[0] = %d, want %d", got, want)
+	}
+}
+
 func TestAMD64OperationsI64(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.SkipNow()
@@ -928,94 +966,172 @@ func TestAMD64OperationsF64(t *testing.T) {
 		Result uint64
 	}{
 		{
-			Name:   "add",
+			Name:   "f64-add",
 			Op:     ops.F64Add,
 			Args:   []uint64{math.Float64bits(3), math.Float64bits(5)},
 			Result: math.Float64bits(8),
 		},
 		{
-			Name:   "add-negative",
+			Name:   "f64-add-negative",
 			Op:     ops.F64Add,
 			Args:   []uint64{math.Float64bits(3), math.Float64bits(-5)},
 			Result: math.Float64bits(-2),
 		},
 		{
-			Name:   "sub",
+			Name:   "f32-add",
+			Op:     ops.F32Add,
+			Args:   []uint64{uint64(math.Float32bits(3)), uint64(math.Float32bits(5))},
+			Result: uint64(math.Float32bits(8)),
+		},
+		{
+			Name:   "f32-add-negative",
+			Op:     ops.F32Add,
+			Args:   []uint64{uint64(math.Float32bits(3)), uint64(math.Float32bits(-5))},
+			Result: uint64(math.Float32bits(-2)),
+		},
+		{
+			Name:   "f64-sub",
 			Op:     ops.F64Sub,
 			Args:   []uint64{math.Float64bits(12), math.Float64bits(3)},
 			Result: math.Float64bits(9),
 		},
 		{
-			Name:   "sub-negative",
+			Name:   "f64-sub-negative",
 			Op:     ops.F64Sub,
 			Args:   []uint64{math.Float64bits(-12.5), math.Float64bits(3)},
 			Result: math.Float64bits(-15.5),
 		},
 		{
-			Name:   "sub-negative-2",
+			Name:   "f64-sub-negative-2",
 			Op:     ops.F64Sub,
 			Args:   []uint64{math.Float64bits(12), math.Float64bits(-3)},
 			Result: math.Float64bits(15),
 		},
 		{
-			Name:   "divide-1",
+			Name:   "f32-sub",
+			Op:     ops.F32Sub,
+			Args:   []uint64{uint64(math.Float32bits(12)), uint64(math.Float32bits(3))},
+			Result: uint64(math.Float32bits(9)),
+		},
+		{
+			Name:   "f32-sub-negative",
+			Op:     ops.F32Sub,
+			Args:   []uint64{uint64(math.Float32bits(-12.5)), uint64(math.Float32bits(3))},
+			Result: uint64(math.Float32bits(-15.5)),
+		},
+		{
+			Name:   "f32-sub-negative-2",
+			Op:     ops.F32Sub,
+			Args:   []uint64{uint64(math.Float32bits(12)), uint64(math.Float32bits(-3))},
+			Result: uint64(math.Float32bits(15)),
+		},
+		{
+			Name:   "f64-divide-1",
 			Op:     ops.F64Div,
 			Args:   []uint64{math.Float64bits(12), math.Float64bits(3)},
 			Result: math.Float64bits(4),
 		},
 		{
-			Name:   "divide-2",
+			Name:   "f64-divide-2",
 			Op:     ops.F64Div,
 			Args:   []uint64{math.Float64bits(1), math.Float64bits(5)},
 			Result: math.Float64bits(0.2),
 		},
 		{
-			Name:   "divide-3",
+			Name:   "f64-divide-3",
 			Op:     ops.F64Div,
 			Args:   []uint64{math.Float64bits(-8), math.Float64bits(-2)},
 			Result: math.Float64bits(4),
 		},
 		{
-			Name:   "multiply-1",
+			Name:   "f32-divide-1",
+			Op:     ops.F32Div,
+			Args:   []uint64{uint64(math.Float32bits(12)), uint64(math.Float32bits(3))},
+			Result: uint64(math.Float32bits(4)),
+		},
+		{
+			Name:   "f32-divide-2",
+			Op:     ops.F32Div,
+			Args:   []uint64{uint64(math.Float32bits(1)), uint64(math.Float32bits(5))},
+			Result: uint64(math.Float32bits(0.2)),
+		},
+		{
+			Name:   "f64-multiply-1",
 			Op:     ops.F64Mul,
 			Args:   []uint64{math.Float64bits(12), math.Float64bits(3)},
 			Result: math.Float64bits(36),
 		},
 		{
-			Name:   "multiply-2",
+			Name:   "f64-multiply-2",
 			Op:     ops.F64Mul,
 			Args:   []uint64{math.Float64bits(-0.25), math.Float64bits(5)},
 			Result: math.Float64bits(-1.25),
 		},
 		{
-			Name:   "multiply-3",
+			Name:   "f64-multiply-3",
 			Op:     ops.F64Mul,
 			Args:   []uint64{math.Float64bits(5000), math.Float64bits(2.5)},
 			Result: math.Float64bits(12500),
 		},
 		{
-			Name:   "min-1",
+			Name:   "f32-multiply-1",
+			Op:     ops.F32Mul,
+			Args:   []uint64{uint64(math.Float32bits(12)), uint64(math.Float32bits(3))},
+			Result: uint64(math.Float32bits(36)),
+		},
+		{
+			Name:   "f32-multiply-2",
+			Op:     ops.F32Mul,
+			Args:   []uint64{uint64(math.Float32bits(-0.25)), uint64(math.Float32bits(5))},
+			Result: uint64(math.Float32bits(-1.25)),
+		},
+		{
+			Name:   "f64-min-1",
 			Op:     ops.F64Min,
 			Args:   []uint64{math.Float64bits(5000), math.Float64bits(2.5)},
 			Result: math.Float64bits(2.5),
 		},
 		{
-			Name:   "min-2",
+			Name:   "f64-min-2",
 			Op:     ops.F64Min,
 			Args:   []uint64{math.Float64bits(2.33), math.Float64bits(2.44)},
 			Result: math.Float64bits(2.33),
 		},
 		{
-			Name:   "max-1",
+			Name:   "f32-min-1",
+			Op:     ops.F32Min,
+			Args:   []uint64{uint64(math.Float32bits(5000)), uint64(math.Float32bits(2.5))},
+			Result: uint64(math.Float32bits(2.5)),
+		},
+		{
+			Name:   "f32-min-2",
+			Op:     ops.F32Min,
+			Args:   []uint64{uint64(math.Float32bits(2.33)), uint64(math.Float32bits(2.44))},
+			Result: uint64(math.Float32bits(2.33)),
+		},
+		{
+			Name:   "f64-max-1",
 			Op:     ops.F64Max,
 			Args:   []uint64{math.Float64bits(5000), math.Float64bits(2.5)},
 			Result: math.Float64bits(5000),
 		},
 		{
-			Name:   "max-2",
+			Name:   "f64-max-2",
 			Op:     ops.F64Max,
 			Args:   []uint64{math.Float64bits(2.33), math.Float64bits(2.44)},
 			Result: math.Float64bits(2.44),
+		},
+		{
+			Name:   "f32-max-1",
+			Op:     ops.F32Max,
+			Args:   []uint64{uint64(math.Float32bits(5000)), uint64(math.Float32bits(2.5))},
+			Result: uint64(math.Float32bits(5000)),
+		},
+		{
+			Name:   "f32-max-2",
+			Op:     ops.F32Max,
+			Args:   []uint64{uint64(math.Float32bits(2.33)), uint64(math.Float32bits(2.44))},
+			Result: uint64(math.Float32bits(2.44)),
 		},
 	}
 
@@ -1035,7 +1151,7 @@ func TestAMD64OperationsF64(t *testing.T) {
 				b.emitPushImmediate(builder, regs, currentInstruction{}, arg)
 			}
 
-			b.emitBinaryF64(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
+			b.emitBinaryFloat(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
 			b.emitPostamble(builder, regs)
 			out := builder.Assemble()
 			// debugPrintAsm(out)
@@ -1059,7 +1175,7 @@ func TestAMD64OperationsF64(t *testing.T) {
 	}
 }
 
-func TestComparisonOpsF64(t *testing.T) {
+func TestComparisonOpsFloat(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.SkipNow()
 	}
@@ -1070,136 +1186,202 @@ func TestComparisonOpsF64(t *testing.T) {
 		Result uint64
 	}{
 		{
-			Name:   "equal-1",
+			Name:   "f64-equal-1",
 			Op:     ops.F64Eq,
 			Args:   []uint64{math.Float64bits(2), math.Float64bits(2)},
 			Result: 1,
 		},
 		{
-			Name:   "equal-2",
+			Name:   "f64-equal-2",
 			Op:     ops.F64Eq,
 			Args:   []uint64{math.Float64bits(2), math.Float64bits(2.1)},
 			Result: 0,
 		},
 		{
-			Name:   "equal-nan-1",
+			Name:   "f64-equal-nan-1",
 			Op:     ops.F64Eq,
 			Args:   []uint64{math.Float64bits(2), math.Float64bits(math.NaN())},
 			Result: 0,
 		},
 		{
-			Name:   "equal-nan-2",
+			Name:   "f64-equal-nan-2",
 			Op:     ops.F64Eq,
 			Args:   []uint64{math.Float64bits(math.NaN()), math.Float64bits(math.NaN())},
 			Result: 0,
 		},
 		{
-			Name:   "not-equal-1",
+			Name:   "f32-equal-1",
+			Op:     ops.F32Eq,
+			Args:   []uint64{uint64(math.Float32bits(2)), uint64(math.Float32bits(2))},
+			Result: 1,
+		},
+		{
+			Name:   "f32-equal-nan-1",
+			Op:     ops.F32Eq,
+			Args:   []uint64{uint64(math.Float32bits(2)), uint64(math.Float32bits(float32(math.NaN())))},
+			Result: 0,
+		},
+		{
+			Name:   "f64-not-equal-1",
 			Op:     ops.F64Ne,
 			Args:   []uint64{math.Float64bits(2), math.Float64bits(2)},
 			Result: 0,
 		},
 		{
-			Name:   "not-equal-2",
+			Name:   "f64-not-equal-2",
 			Op:     ops.F64Ne,
 			Args:   []uint64{math.Float64bits(2), math.Float64bits(2.1)},
 			Result: 1,
 		},
 		{
-			Name:   "not-equal-nan-1",
+			Name:   "f64-not-equal-nan-1",
 			Op:     ops.F64Ne,
 			Args:   []uint64{math.Float64bits(math.NaN()), math.Float64bits(2.1)},
 			Result: 1,
 		},
 		{
-			Name:   "not-equal-nan-2",
+			Name:   "f64-not-equal-nan-2",
 			Op:     ops.F64Ne,
 			Args:   []uint64{math.Float64bits(2.1), math.Float64bits(math.NaN())},
 			Result: 1,
 		},
 		{
-			Name:   "less-than-1",
+			Name:   "f32-not-equal-1",
+			Op:     ops.F32Ne,
+			Args:   []uint64{uint64(math.Float32bits(2)), uint64(math.Float32bits(2))},
+			Result: 0,
+		},
+		{
+			Name:   "f32-not-equal-nan-1",
+			Op:     ops.F32Ne,
+			Args:   []uint64{uint64(math.Float32bits(float32(math.NaN()))), uint64(math.Float32bits(2.1))},
+			Result: 1,
+		},
+		{
+			Name:   "f64-less-than-1",
 			Op:     ops.F64Lt,
 			Args:   []uint64{math.Float64bits(1), math.Float64bits(2)},
 			Result: 1,
 		},
 		{
-			Name:   "less-than-2",
+			Name:   "f64-less-than-2",
 			Op:     ops.F64Lt,
 			Args:   []uint64{math.Float64bits(-1.1), math.Float64bits(-1.2)},
 			Result: 0,
 		},
 		{
-			Name:   "less-than-3",
+			Name:   "f64-less-than-3",
 			Op:     ops.F64Lt,
 			Args:   []uint64{math.Float64bits(-1.2), math.Float64bits(-1.2)},
 			Result: 0,
 		},
 		{
-			Name:   "less-than-nan",
+			Name:   "f64-less-than-nan",
 			Op:     ops.F64Lt,
 			Args:   []uint64{math.Float64bits(-1.2), math.Float64bits(math.NaN())},
 			Result: 0,
 		},
 		{
-			Name:   "greater-than-1",
+			Name:   "f32-less-than-1",
+			Op:     ops.F32Lt,
+			Args:   []uint64{uint64(math.Float32bits(1)), uint64(math.Float32bits(2))},
+			Result: 1,
+		},
+		{
+			Name:   "f32-less-than-nan",
+			Op:     ops.F32Lt,
+			Args:   []uint64{uint64(math.Float32bits(-1.2)), uint64(math.Float32bits(float32(math.NaN())))},
+			Result: 0,
+		},
+		{
+			Name:   "f64-greater-than-1",
 			Op:     ops.F64Gt,
 			Args:   []uint64{math.Float64bits(1), math.Float64bits(2)},
 			Result: 0,
 		},
 		{
-			Name:   "greater-than-2",
+			Name:   "f64-greater-than-2",
 			Op:     ops.F64Gt,
 			Args:   []uint64{math.Float64bits(-1.1), math.Float64bits(-1.2)},
 			Result: 1,
 		},
 		{
-			Name:   "greater-than-3",
+			Name:   "f64-greater-than-3",
 			Op:     ops.F64Gt,
 			Args:   []uint64{math.Float64bits(-1.2), math.Float64bits(-1.2)},
 			Result: 0,
 		},
 		{
-			Name:   "less-than-equal-1",
+			Name:   "f32-greater-than-1",
+			Op:     ops.F32Gt,
+			Args:   []uint64{uint64(math.Float32bits(3)), uint64(math.Float32bits(2))},
+			Result: 1,
+		},
+		{
+			Name:   "f64-less-than-equal-1",
 			Op:     ops.F64Le,
 			Args:   []uint64{math.Float64bits(1), math.Float64bits(2)},
 			Result: 1,
 		},
 		{
-			Name:   "less-than-equal-2",
+			Name:   "f64-less-than-equal-2",
 			Op:     ops.F64Le,
 			Args:   []uint64{math.Float64bits(-1.1), math.Float64bits(-1.2)},
 			Result: 0,
 		},
 		{
-			Name:   "less-than-equal-3",
+			Name:   "f64-less-than-equal-3",
 			Op:     ops.F64Le,
 			Args:   []uint64{math.Float64bits(-1.2), math.Float64bits(-1.2)},
 			Result: 1,
 		},
 		{
-			Name:   "greater-than-equal-1",
+			Name:   "f32-less-than-equal-1",
+			Op:     ops.F32Le,
+			Args:   []uint64{uint64(math.Float32bits(1)), uint64(math.Float32bits(2))},
+			Result: 1,
+		},
+		{
+			Name:   "f32-less-than-equal-2",
+			Op:     ops.F32Le,
+			Args:   []uint64{uint64(math.Float32bits(-1.1)), uint64(math.Float32bits(-1.2))},
+			Result: 0,
+		},
+		{
+			Name:   "f64-greater-than-equal-1",
 			Op:     ops.F64Ge,
 			Args:   []uint64{math.Float64bits(1), math.Float64bits(2)},
 			Result: 0,
 		},
 		{
-			Name:   "greater-than-equal-2",
+			Name:   "f64-greater-than-equal-2",
 			Op:     ops.F64Ge,
 			Args:   []uint64{math.Float64bits(-1.1), math.Float64bits(-1.2)},
 			Result: 1,
 		},
 		{
-			Name:   "greater-than-equal-3",
+			Name:   "f64-greater-than-equal-3",
 			Op:     ops.F64Ge,
 			Args:   []uint64{math.Float64bits(-1.2), math.Float64bits(-1.2)},
 			Result: 1,
 		},
 		{
-			Name:   "greater-than-equal-4",
+			Name:   "f64-greater-than-equal-4",
 			Op:     ops.F64Ge,
 			Args:   []uint64{math.Float64bits(2), math.Float64bits(-1)},
 			Result: 1,
+		},
+		{
+			Name:   "f32-greater-than-equal-1",
+			Op:     ops.F32Ge,
+			Args:   []uint64{uint64(math.Float32bits(3)), uint64(math.Float32bits(2))},
+			Result: 1,
+		},
+		{
+			Name:   "f32-greater-than-equal-2",
+			Op:     ops.F32Ge,
+			Args:   []uint64{uint64(math.Float32bits(-1.3)), uint64(math.Float32bits(-1.2))},
+			Result: 0,
 		},
 	}
 

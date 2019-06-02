@@ -94,6 +94,9 @@ func (s *scanner) ScanFunc(bytecode []byte, meta *BytecodeMetadata) ([]Compilati
 		case ops.I64Const, ops.I32Const, ops.GetLocal:
 			inProgress.Metrics.IntegerOps++
 			inProgress.Metrics.StackWrites++
+		case ops.F64Const, ops.F32Const:
+			inProgress.Metrics.FloatOps++
+			inProgress.Metrics.StackWrites++
 		case ops.SetLocal:
 			inProgress.Metrics.IntegerOps++
 			inProgress.Metrics.StackReads++
@@ -111,8 +114,10 @@ func (s *scanner) ScanFunc(bytecode []byte, meta *BytecodeMetadata) ([]Compilati
 			inProgress.Metrics.StackReads += 2
 			inProgress.Metrics.StackWrites++
 
-		case ops.F64Add, ops.F64Sub, ops.F64Div, ops.F64Mul, ops.F64Min, ops.F64Max,
-			ops.F64Eq, ops.F64Ne, ops.F64Lt, ops.F64Gt, ops.F64Le, ops.F64Ge:
+		case ops.F64Add, ops.F32Add, ops.F64Sub, ops.F32Sub, ops.F64Div, ops.F32Div, ops.F64Mul, ops.F32Mul,
+			ops.F64Min, ops.F32Min, ops.F64Max, ops.F32Max,
+			ops.F64Eq, ops.F64Ne, ops.F64Lt, ops.F64Gt, ops.F64Le, ops.F64Ge,
+			ops.F32Eq, ops.F32Ne, ops.F32Lt, ops.F32Gt, ops.F32Le, ops.F32Ge:
 			inProgress.Metrics.FloatOps++
 			inProgress.Metrics.StackReads += 2
 			inProgress.Metrics.StackWrites++
@@ -122,6 +127,16 @@ func (s *scanner) ScanFunc(bytecode []byte, meta *BytecodeMetadata) ([]Compilati
 			inProgress.Metrics.FloatOps++
 			inProgress.Metrics.StackReads++
 			inProgress.Metrics.StackWrites++
+
+		case ops.Drop:
+			inProgress.Metrics.StackReads++
+		case ops.Select:
+			inProgress.Metrics.StackReads += 3
+			inProgress.Metrics.StackWrites++
+
+		case ops.F64ReinterpretI64, ops.F32ReinterpretI32, ops.I64ReinterpretF64, ops.I32ReinterpretF32:
+			inProgress.Metrics.FloatOps++
+			inProgress.Metrics.IntegerOps++
 		}
 		inProgress.Metrics.AllOps++
 	}
