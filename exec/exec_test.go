@@ -465,6 +465,46 @@ func BenchmarkU64Arithmetic10Native(b *testing.B) {
 	}
 }
 
+func BenchmarkF64Arithmetic10Interpreted(b *testing.B) {
+	vm, funcIndex := loadModuleFindFunc(b, "testdata/rust-basic.wasm", "loopedArithmeticF64Benchmark", false)
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		benchmarkDummy, _ = vm.ExecCode(int64(funcIndex), 10, 10)
+	}
+}
+
+func BenchmarkF64Arithmetic10Native(b *testing.B) {
+	if runtime.GOARCH != "amd64" {
+		b.SkipNow()
+	}
+
+	vm, funcIndex := loadModuleFindFunc(b, "testdata/rust-basic.wasm", "loopedArithmeticF64Benchmark", true)
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		benchmarkDummy, _ = vm.ExecCode(int64(funcIndex), 10, 10)
+	}
+}
+
+func BenchmarkF32Arithmetic10Interpreted(b *testing.B) {
+	vm, funcIndex := loadModuleFindFunc(b, "testdata/rust-basic.wasm", "loopedArithmeticF32Benchmark", false)
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		benchmarkDummy, _ = vm.ExecCode(int64(funcIndex), 10, 10)
+	}
+}
+
+func BenchmarkF32Arithmetic10Native(b *testing.B) {
+	if runtime.GOARCH != "amd64" {
+		b.SkipNow()
+	}
+
+	vm, funcIndex := loadModuleFindFunc(b, "testdata/rust-basic.wasm", "loopedArithmeticF32Benchmark", true)
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		benchmarkDummy, _ = vm.ExecCode(int64(funcIndex), 10, 10)
+	}
+}
+
 func BenchmarkU64Arithmetic50Interpreted(b *testing.B) {
 	vm, funcIndex := loadModuleFindFunc(b, "testdata/rust-basic.wasm", "loopedArithmeticI64Benchmark", false)
 	b.ResetTimer()

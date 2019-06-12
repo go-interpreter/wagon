@@ -35,3 +35,43 @@ pub extern "C" fn loopedArithmeticI64Benchmark(n: u64, input: u64) -> u64 {
     }
     out
 }
+
+#[no_mangle]
+pub extern "C" fn loopedArithmeticF64Benchmark(n: u64, input: f64) -> f64 {
+    let mut out = input + 2f64;
+    for x in 0..n {
+        let y = (input * x as f64 / 3.121) * 2.003;
+        out += ((input + 13.0) * input) - x as f64;
+        out -= ((input + 11.0) * input) - x as f64;
+        out += ((input + 14.11) * input) - x as f64;
+        out -= ((input + 10.11) * input) - x as f64;
+        out += ((input + 15.22) * input) - x as f64;
+        out -= ((input + 9.222) * input) - x as f64;
+        out += y * input;
+        out *= 1.999;
+        if x > 5 && y > 0.0 {
+            out -= y * 2.0;
+        }
+    }
+    out
+}
+
+#[no_mangle]
+pub extern "C" fn loopedArithmeticF32Benchmark(n: u64, input: f32) -> f32 {
+    let mut out = input + 2f32;
+    for x in 0..n {
+        let y = (input * x as f32 / 3.121) * 2.003;
+        out += ((input + 13.0) * input) - x as f32;
+        out -= ((input + 11.0) * input) - x as f32;
+        out += ((input + 14.11) * input) - x as f32;
+        out -= ((input + 10.11) * input) - x as f32;
+        out += ((input + 15.22) * input) - x as f32;
+        out -= ((input + 9.222) * input) - x as f32;
+        out += y * input;
+        out *= 1.999;
+        if x > 5 && y > 0.0 {
+            out -= y * 2.0;
+        }
+    }
+    out
+}

@@ -1134,6 +1134,16 @@
         "function": "loopedArithmeticI64Benchmark",
         "args": ["i64:80", "i64:7"],
         "return": "i64:110262743"
+      },
+      {
+        "function": "loopedArithmeticF64Benchmark",
+        "args": ["i64:80", "f64:7"],
+        "return": "f64:2.7766899067423496e+26"
+      },
+      {
+        "function": "loopedArithmeticF32Benchmark",
+        "args": ["i64:80", "f32:7"],
+        "return": "f32:2.7766849e+26"
       }
     ]
   }
