@@ -156,14 +156,14 @@ func (vm *VM) tryNativeCompile() error {
 // [fp+pointerSize:fp+pointerSize*2]: sliceHeader for locals variables.
 func (vm *VM) nativeCodeInvocation(asmIndex uint32) {
 	block := vm.ctx.asm[asmIndex]
-	finishSignal := block.nativeUnit.Invoke(&vm.ctx.stack, &vm.ctx.locals)
+	finishSignal := block.nativeUnit.Invoke(&vm.ctx.stack, &vm.ctx.locals, &vm.globals, &vm.memory)
 
 	switch finishSignal.CompletionStatus() {
 	case compile.CompletionOK:
 	case compile.CompletionFatalInternalError:
 		panic("fatal error in native execution")
 	case compile.CompletionBadBounds:
-		panic(fmt.Sprintf("bounds check failed at instruction %d", finishSignal.Index()))
+		panic("exec: out of bounds memory access")
 	}
 	vm.ctx.pc = int64(block.resumePC)
 }

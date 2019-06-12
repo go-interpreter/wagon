@@ -12,7 +12,7 @@ import (
 
 // NativeCodeUnit represents compiled native code.
 type NativeCodeUnit interface {
-	Invoke(stack, locals *[]uint64) JITExitSignal
+	Invoke(stack, locals, globals *[]uint64, mem *[]byte) JITExitSignal
 }
 
 func debugPrintAsm(asm []byte) {

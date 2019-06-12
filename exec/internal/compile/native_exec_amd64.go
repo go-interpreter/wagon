@@ -8,4 +8,4 @@ package compile
 
 import "unsafe"
 
-func jitcall(asm unsafe.Pointer, stack *[]uint64, locals *[]uint64) uint64
+func jitcall(asm unsafe.Pointer, stack, locals, globals *[]uint64, mem *[]byte) uint64

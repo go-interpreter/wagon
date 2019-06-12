@@ -7,6 +7,7 @@ package compile
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 
 	ops "github.com/go-interpreter/wagon/wasm/operators"
 	asm "github.com/twitchyliquid64/golang-asm"
@@ -41,7 +42,7 @@ func (regs *dirtyRegs) flush(builder *asm.Builder, reg uint16) {
 	switch *regState {
 	case stateScratch:
 		return
-	case stateStackFirstElem, stateLocalFirstElem:
+	case stateStackFirstElem, stateLocalFirstElem, stateGlobalSliceHeader:
 		return // Value does not change - no need to write back.
 	case stateStackLen:
 		prog := builder.NewProg()
@@ -61,6 +62,8 @@ func (regs *dirtyRegs) flush(builder *asm.Builder, reg uint16) {
 
 // Details of the AMD64 backend:
 // Reserved registers (for now):
+//  - RSI - pointer to memory sliceHeader
+//  - RDI - poison register (Spectre mitigation)
 //  - R10 - pointer to stack sliceHeader
 //  - R11 - pointer to locals sliceHeader
 //  - R12 - reserved for stack handling
@@ -68,7 +71,7 @@ func (regs *dirtyRegs) flush(builder *asm.Builder, reg uint16) {
 // Pseudo-scratch registers (can be used for scratch as long as their
 // dirtyState is updated):
 //  - R14 (cache's pointer to stack backing array)
-//  - R15 (cache's pointer to locals backing array)
+//  - R15 (cache's pointer to local backing array / global sliceHeader)
 // Scratch registers:
 //  - RAX, RBX, RCX, RDX, R8, R9
 // Most emission instructions make few attempts to optimize in order
@@ -100,6 +103,14 @@ func (b *AMD64Backend) Scanner() *scanner {
 				ops.I32Const:          true,
 				ops.F64Const:          true,
 				ops.F32Const:          true,
+				ops.I64Load:           true,
+				ops.I32Load:           true,
+				ops.F32Load:           true,
+				ops.F64Load:           true,
+				ops.I64Store:          true,
+				ops.I32Store:          true,
+				ops.F64Store:          true,
+				ops.F32Store:          true,
 				ops.I64Add:            true,
 				ops.I32Add:            true,
 				ops.I64Sub:            true,
@@ -122,6 +133,8 @@ func (b *AMD64Backend) Scanner() *scanner {
 				ops.I32RemS:           true,
 				ops.GetLocal:          true,
 				ops.SetLocal:          true,
+				ops.GetGlobal:         true,
+				ops.SetGlobal:         true,
 				ops.I64Shl:            true,
 				ops.I64ShrU:           true,
 				ops.I64ShrS:           true,
@@ -237,6 +250,21 @@ func (b *AMD64Backend) Build(candidate CompilationCandidate, code []byte, meta *
 		case ops.SetLocal:
 			b.emitWasmStackLoad(builder, &regs, ci, x86.REG_AX)
 			b.emitWasmLocalsSave(builder, &regs, ci, x86.REG_AX, b.readIntImmediate(code, inst))
+		case ops.GetGlobal:
+			b.emitWasmGlobalsLoad(builder, &regs, ci, x86.REG_AX, b.readIntImmediate(code, inst))
+			b.emitWasmStackPush(builder, &regs, ci, x86.REG_AX)
+		case ops.SetGlobal:
+			b.emitWasmStackLoad(builder, &regs, ci, x86.REG_AX)
+			b.emitWasmGlobalsSave(builder, &regs, ci, x86.REG_AX, b.readIntImmediate(code, inst))
+		case ops.I64Load, ops.I32Load, ops.F64Load, ops.F32Load:
+			if err := b.emitWasmMemoryLoad(builder, &regs, ci, x86.REG_AX, b.readIntImmediate(code, inst)); err != nil {
+				return nil, fmt.Errorf("compile: amd64.emitWasmMemoryLoad: %v", err)
+			}
+			b.emitWasmStackPush(builder, &regs, ci, x86.REG_AX)
+		case ops.I64Store, ops.I32Store, ops.F64Store, ops.F32Store:
+			if err := b.emitWasmMemoryStore(builder, &regs, ci, b.readIntImmediate(code, inst)); err != nil {
+				return nil, fmt.Errorf("compile: amd64.emitWasmMemoryStore: %v", err)
+			}
 		case ops.I64Add, ops.I32Add, ops.I64Sub, ops.I32Sub, ops.I64Mul, ops.I32Mul,
 			ops.I64Or, ops.I32Or, ops.I64And, ops.I32And, ops.I64Xor, ops.I32Xor:
 			if err := b.emitBinaryI64(builder, &regs, ci); err != nil {
@@ -302,6 +330,266 @@ func (b *AMD64Backend) readIntImmediate(code []byte, meta InstructionMetadata) u
 	return binary.LittleEndian.Uint64(code[meta.Start+1 : meta.Start+meta.Size])
 }
 
+func (b *AMD64Backend) paramsForMemoryOp(op byte) (size uint, inst obj.As) {
+	switch op {
+	case ops.I64Load, ops.F64Load:
+		return 8, x86.AMOVQ
+	case ops.I32Load, ops.F32Load:
+		return 4, x86.AMOVL
+	case ops.I64Store, ops.F64Store:
+		return 8, x86.AMOVQ
+	case ops.I32Store, ops.F32Store:
+		return 4, x86.AMOVL
+	}
+	panic("unreachable")
+}
+
+func (b *AMD64Backend) emitWasmMemoryLoad(builder *asm.Builder, regs *dirtyRegs, ci currentInstruction, outReg int16, base uint64) error {
+	// movq rdi, 0xffffffffffffffff (reset poison register)
+	// xorq r8,  r8
+	// <load offset> --> r9
+	// addq    r9, $(base)
+	// movq   rcx, r9
+	// addq   rcx, $(movSize)
+	// movq   rbx, [rsi+8]
+	// cmp    rcx, rbx
+	// cmovlt rdi, r8 (poison the mask if bounds check fails)
+	// jge    boundsGood
+	// <emitExit()>
+	// boundsGood:
+	// movq   rbx, [rsi]
+	// addq   rbx, r9
+	// movq <out>, [rbx]
+	// andq <out>, rdi (apply poison mask)
+	movSize, movOp := b.paramsForMemoryOp(ci.inst.Op)
+
+	// movq rdi, 0xffffffffffffffff
+	// Set the poison mask to all zeros.
+	prog := builder.NewProg()
+	prog.As = x86.AMOVQ
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_DI
+	prog.From.Type = obj.TYPE_CONST
+	prog.From.Offset = int64(maxuint64())
+	builder.AddInstruction(prog)
+	// xorq r8, r8
+	prog = builder.NewProg()
+	prog.As = x86.AXORQ
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_R8
+	prog.From.Type = obj.TYPE_REG
+	prog.From.Reg = x86.REG_R8
+	builder.AddInstruction(prog)
+	// Load offset from stack.
+	b.emitWasmStackLoad(builder, regs, ci, x86.REG_R9)
+	// addq r9, $(base)
+	prog = builder.NewProg()
+	prog.As = x86.AADDQ
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_R9
+	prog.From.Type = obj.TYPE_CONST
+	prog.From.Offset = int64(base)
+	builder.AddInstruction(prog)
+	// movq rcx, r9
+	prog = builder.NewProg()
+	prog.As = x86.AMOVQ
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_CX
+	prog.From.Type = obj.TYPE_REG
+	prog.From.Reg = x86.REG_R9
+	builder.AddInstruction(prog)
+	// addq rcx, $(movSize)
+	prog = builder.NewProg()
+	prog.As = x86.AADDQ
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_CX
+	prog.From.Type = obj.TYPE_CONST
+	prog.From.Offset = int64(movSize)
+	builder.AddInstruction(prog)
+	// movq rbx, [rsi+8]
+	prog = builder.NewProg()
+	prog.As = x86.AMOVQ
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_BX
+	prog.From.Type = obj.TYPE_MEM
+	prog.From.Reg = x86.REG_SI
+	prog.From.Offset = 8
+	builder.AddInstruction(prog)
+	// cmp rcx, rbx
+	prog = builder.NewProg()
+	prog.As = x86.ACMPQ
+	prog.From.Type = obj.TYPE_REG
+	prog.From.Reg = x86.REG_BX
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_CX
+	builder.AddInstruction(prog)
+	// cmovlt rdi, r8
+	prog = builder.NewProg()
+	prog.As = x86.ACMOVQLT
+	prog.From.Type = obj.TYPE_REG
+	prog.From.Reg = x86.REG_R8
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_DI
+	builder.AddInstruction(prog)
+
+	// ja boundsGood
+	jmp := builder.NewProg()
+	jmp.As = x86.AJGE
+	jmp.To.Type = obj.TYPE_BRANCH
+	builder.AddInstruction(jmp)
+	b.emitExit(builder, &dirtyRegs{}, CompletionBadBounds|makeExitIndex(ci.idx))
+
+	// boundsGood:
+	prog = builder.NewProg()
+	prog.As = obj.ANOP // branch target - assembler will optimize out.
+	jmp.Pcond = prog
+	builder.AddInstruction(prog)
+
+	// movq rbx, [rsi]
+	prog = builder.NewProg()
+	prog.As = x86.AMOVQ
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_BX
+	prog.From.Type = obj.TYPE_MEM
+	prog.From.Reg = x86.REG_SI
+	builder.AddInstruction(prog)
+
+	// addq rbx, r9
+	prog = builder.NewProg()
+	prog.As = x86.AADDQ
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_BX
+	prog.From.Type = obj.TYPE_REG
+	prog.From.Reg = x86.REG_R9
+	builder.AddInstruction(prog)
+	// mov $(outreg), [rbx]
+	prog = builder.NewProg()
+	prog.As = movOp
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = outReg
+	prog.From.Type = obj.TYPE_MEM
+	prog.From.Reg = x86.REG_BX
+	builder.AddInstruction(prog)
+	// andq $(outreg), rdi
+	prog = builder.NewProg()
+	prog.As = x86.AANDQ
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = outReg
+	prog.From.Type = obj.TYPE_REG
+	prog.From.Reg = x86.REG_DI
+	builder.AddInstruction(prog)
+	return nil
+}
+
+// Necessary to avoid overflow warnings when
+// converting to int64 (we want the overflow).
+func maxuint64() uint64 {
+	return math.MaxUint64
+}
+
+func (b *AMD64Backend) emitWasmMemoryStore(builder *asm.Builder, regs *dirtyRegs, ci currentInstruction, base uint64) error {
+	// <load value> --> rdx
+	// <load offset> --> r9
+	// addq    r9, $(base)
+	// movq   rcx, r9
+	// addq   rcx, $(movSize)
+	// movq   rbx, [rsi+8]
+	// cmp    rcx, rbx
+	// jge    boundsGood
+	// <emitExit()>
+	// boundsGood:
+	// movq   rbx, [rsi]
+	// addq   rbx, r9
+	// movq   [rbx], rdx
+	movSize, movOp := b.paramsForMemoryOp(ci.inst.Op)
+
+	// Load value from stack.
+	b.emitWasmStackLoad(builder, regs, ci, x86.REG_DX)
+	// Load offset from stack.
+	b.emitWasmStackLoad(builder, regs, ci, x86.REG_R9)
+	// addq r9, $(base)
+	prog := builder.NewProg()
+	prog.As = x86.AADDQ
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_R9
+	prog.From.Type = obj.TYPE_CONST
+	prog.From.Offset = int64(base)
+	builder.AddInstruction(prog)
+	// movq rcx, r9
+	prog = builder.NewProg()
+	prog.As = x86.AMOVQ
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_CX
+	prog.From.Type = obj.TYPE_REG
+	prog.From.Reg = x86.REG_R9
+	builder.AddInstruction(prog)
+	// addq rcx, $(movSize)
+	prog = builder.NewProg()
+	prog.As = x86.AADDQ
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_CX
+	prog.From.Type = obj.TYPE_CONST
+	prog.From.Offset = int64(movSize)
+	builder.AddInstruction(prog)
+	// movq rbx, [rsi+8]
+	prog = builder.NewProg()
+	prog.As = x86.AMOVQ
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_BX
+	prog.From.Type = obj.TYPE_MEM
+	prog.From.Reg = x86.REG_SI
+	prog.From.Offset = 8
+	builder.AddInstruction(prog)
+	// cmp rcx, rbx
+	prog = builder.NewProg()
+	prog.As = x86.ACMPQ
+	prog.From.Type = obj.TYPE_REG
+	prog.From.Reg = x86.REG_BX
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_CX
+	builder.AddInstruction(prog)
+
+	// ja boundsGood
+	jmp := builder.NewProg()
+	jmp.As = x86.AJGE
+	jmp.To.Type = obj.TYPE_BRANCH
+	builder.AddInstruction(jmp)
+	b.emitExit(builder, &dirtyRegs{}, CompletionBadBounds|makeExitIndex(ci.idx))
+
+	// boundsGood:
+	prog = builder.NewProg()
+	prog.As = obj.ANOP // branch target - assembler will optimize out.
+	jmp.Pcond = prog
+	builder.AddInstruction(prog)
+
+	// movq rbx, [rsi]
+	prog = builder.NewProg()
+	prog.As = x86.AMOVQ
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_BX
+	prog.From.Type = obj.TYPE_MEM
+	prog.From.Reg = x86.REG_SI
+	builder.AddInstruction(prog)
+
+	// addq rbx, r9
+	prog = builder.NewProg()
+	prog.As = x86.AADDQ
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_BX
+	prog.From.Type = obj.TYPE_REG
+	prog.From.Reg = x86.REG_R9
+	builder.AddInstruction(prog)
+	// mov [rbx], rdx
+	prog = builder.NewProg()
+	prog.As = movOp
+	prog.From.Type = obj.TYPE_REG
+	prog.From.Reg = x86.REG_DX
+	prog.To.Type = obj.TYPE_MEM
+	prog.To.Reg = x86.REG_BX
+	builder.AddInstruction(prog)
+	return nil
+}
+
 func (b *AMD64Backend) emitWasmLocalsLoad(builder *asm.Builder, regs *dirtyRegs, ci currentInstruction, reg int16, index uint64) {
 	// movq rbx, $(index)
 	// movq r15, [r11] (if not cached)
@@ -343,6 +631,114 @@ func (b *AMD64Backend) emitWasmLocalsLoad(builder *asm.Builder, regs *dirtyRegs,
 	prog.From.Reg = x86.REG_R12
 	prog.To.Type = obj.TYPE_REG
 	prog.To.Reg = reg
+	builder.AddInstruction(prog)
+}
+
+func (b *AMD64Backend) emitWasmGlobalsLoad(builder *asm.Builder, regs *dirtyRegs, ci currentInstruction, reg int16, index uint64) {
+	// movq rbx, $(index)
+	// movq r15, [rsp+24] (if not cached)
+	// movq r15, [r15]    (if not cached)
+	// leaq r12, [r15 + rbx*8]
+	// movq reg, [r12]
+
+	prog := builder.NewProg()
+	prog.As = x86.AMOVQ
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_BX
+	prog.From.Type = obj.TYPE_CONST
+	prog.From.Offset = int64(index)
+	builder.AddInstruction(prog)
+
+	if regs.R15 != stateGlobalSliceHeader {
+		prog = builder.NewProg()
+		prog.As = x86.AMOVQ
+		prog.To.Type = obj.TYPE_REG
+		prog.To.Reg = x86.REG_R15
+		prog.From.Type = obj.TYPE_MEM
+		prog.From.Reg = x86.REG_SP
+		prog.From.Offset = 32
+		builder.AddInstruction(prog)
+
+		prog = builder.NewProg()
+		prog.As = x86.AMOVQ
+		prog.To.Type = obj.TYPE_REG
+		prog.To.Reg = x86.REG_R15
+		prog.From.Type = obj.TYPE_MEM
+		prog.From.Reg = x86.REG_R15
+		builder.AddInstruction(prog)
+		regs.R15 = stateGlobalSliceHeader
+	}
+
+	prog = builder.NewProg()
+	prog.As = x86.ALEAQ
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_R12
+	prog.From.Type = obj.TYPE_MEM
+	prog.From.Reg = x86.REG_R15
+	prog.From.Scale = 8
+	prog.From.Index = x86.REG_BX
+	builder.AddInstruction(prog)
+
+	prog = builder.NewProg()
+	prog.As = x86.AMOVQ
+	prog.From.Type = obj.TYPE_MEM
+	prog.From.Reg = x86.REG_R12
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = reg
+	builder.AddInstruction(prog)
+}
+
+func (b *AMD64Backend) emitWasmGlobalsSave(builder *asm.Builder, regs *dirtyRegs, ci currentInstruction, reg int16, index uint64) {
+	// movq rbx, $(index)
+	// movq r15, [rsp+24] (if not cached)
+	// movq r15, [r15]    (if not cached)
+	// leaq r12, [r15 + rbx*8]
+	// movq [r12], reg
+
+	prog := builder.NewProg()
+	prog.As = x86.AMOVQ
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_BX
+	prog.From.Type = obj.TYPE_CONST
+	prog.From.Offset = int64(index)
+	builder.AddInstruction(prog)
+
+	if regs.R15 != stateGlobalSliceHeader {
+		prog = builder.NewProg()
+		prog.As = x86.AMOVQ
+		prog.To.Type = obj.TYPE_REG
+		prog.To.Reg = x86.REG_R15
+		prog.From.Type = obj.TYPE_MEM
+		prog.From.Reg = x86.REG_SP
+		prog.From.Offset = 32
+		builder.AddInstruction(prog)
+
+		prog = builder.NewProg()
+		prog.As = x86.AMOVQ
+		prog.To.Type = obj.TYPE_REG
+		prog.To.Reg = x86.REG_R15
+		prog.From.Type = obj.TYPE_MEM
+		prog.From.Reg = x86.REG_R15
+		builder.AddInstruction(prog)
+		regs.R15 = stateGlobalSliceHeader
+	}
+
+	prog = builder.NewProg()
+	prog.As = x86.ALEAQ
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_R12
+	prog.From.Type = obj.TYPE_MEM
+	prog.From.Reg = x86.REG_R15
+	prog.From.Scale = 8
+	prog.From.Index = x86.REG_BX
+	builder.AddInstruction(prog)
+
+	prog = builder.NewProg()
+	prog.As = x86.AMOVQ
+	prog.To.Type = obj.TYPE_MEM
+	prog.To.Reg = x86.REG_R12
+	prog.From.Type = obj.TYPE_REG
+	prog.From.Reg = reg
 	builder.AddInstruction(prog)
 }
 
@@ -1038,7 +1434,7 @@ func (b *AMD64Backend) emitExit(builder *asm.Builder, regs *dirtyRegs, status Co
 	retValue.From.Offset = int64(status)
 	retValue.To.Type = obj.TYPE_MEM
 	retValue.To.Reg = x86.REG_SP
-	retValue.To.Offset = 32 // Return value - above jitcall()'s arguments
+	retValue.To.Offset = 48 // Return value - above jitcall()'s arguments
 	builder.AddInstruction(retValue)
 	ret := builder.NewProg()
 	ret.As = obj.ARET

@@ -43,7 +43,7 @@ func TestAMD64JitCall(t *testing.T) {
 
 	fakeStack := make([]uint64, 0, 5)
 	fakeLocals := make([]uint64, 0, 0)
-	nativeBlock.Invoke(&fakeStack, &fakeLocals)
+	nativeBlock.Invoke(&fakeStack, &fakeLocals, nil, nil)
 
 	if got, want := len(fakeStack), 0; got != want {
 		t.Errorf("fakeStack.Len = %d, want %d", got, want)
@@ -93,7 +93,7 @@ func TestAMD64StackPush(t *testing.T) {
 
 	fakeStack := make([]uint64, 3, 5)
 	fakeLocals := make([]uint64, 0, 10)
-	if exitSignal := nativeBlock.Invoke(&fakeStack, &fakeLocals); exitSignal.CompletionStatus() != CompletionOK {
+	if exitSignal := nativeBlock.Invoke(&fakeStack, &fakeLocals, nil, nil); exitSignal.CompletionStatus() != CompletionOK {
 		t.Fatalf("native execution returned non-ok completion status: %v", exitSignal.CompletionStatus())
 	}
 
@@ -140,7 +140,7 @@ func TestAMD64StackPop(t *testing.T) {
 	fakeStack := make([]uint64, 2, 5)
 	fakeStack[1] = 1337
 	fakeLocals := make([]uint64, 0, 0)
-	if exitSignal := nativeBlock.Invoke(&fakeStack, &fakeLocals); exitSignal.CompletionStatus() != CompletionOK {
+	if exitSignal := nativeBlock.Invoke(&fakeStack, &fakeLocals, nil, nil); exitSignal.CompletionStatus() != CompletionOK {
 		t.Fatalf("native execution returned non-ok completion status: %v", exitSignal.CompletionStatus())
 	}
 
@@ -176,7 +176,7 @@ func TestAMD64ExitSignal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := nativeBlock.Invoke(&fakeStack, &fakeLocals)
+	result := nativeBlock.Invoke(&fakeStack, &fakeLocals, nil, nil)
 	if result.CompletionStatus() != CompletionOK {
 		t.Errorf("Execution returned non-OK completion status: %v", result.CompletionStatus())
 	}
@@ -201,7 +201,7 @@ func TestAMD64ExitSignal(t *testing.T) {
 	if nativeBlock, err = allocator.AllocateExec(out); err != nil {
 		t.Fatal(err)
 	}
-	result = nativeBlock.Invoke(&fakeStack, &fakeLocals)
+	result = nativeBlock.Invoke(&fakeStack, &fakeLocals, nil, nil)
 	if result.CompletionStatus() != CompletionBadBounds {
 		t.Errorf("Execution returned non-BadBounds completion status: %v", result.CompletionStatus())
 	}
@@ -226,7 +226,7 @@ func TestAMD64ExitSignal(t *testing.T) {
 	if nativeBlock, err = allocator.AllocateExec(out); err != nil {
 		t.Fatal(err)
 	}
-	result = nativeBlock.Invoke(&fakeStack, &fakeLocals)
+	result = nativeBlock.Invoke(&fakeStack, &fakeLocals, nil, nil)
 	if result.CompletionStatus() != CompletionBadBounds {
 		t.Errorf("Execution returned non-BadBounds completion status: %v", result.CompletionStatus())
 	}
@@ -266,7 +266,7 @@ func TestAMD64LocalsGet(t *testing.T) {
 	fakeLocals := make([]uint64, 2, 2)
 	fakeLocals[0] = 1335
 	fakeLocals[1] = 2
-	nativeBlock.Invoke(&fakeStack, &fakeLocals)
+	nativeBlock.Invoke(&fakeStack, &fakeLocals, nil, nil)
 
 	if got, want := len(fakeStack), 1; got != want {
 		t.Errorf("fakeStack.Len = %d, want %d", got, want)
@@ -308,7 +308,7 @@ func TestAMD64LocalsSet(t *testing.T) {
 	fakeLocals := make([]uint64, 5, 5)
 	fakeLocals[0] = 1335
 	fakeLocals[1] = 2
-	nativeBlock.Invoke(&fakeStack, &fakeLocals)
+	nativeBlock.Invoke(&fakeStack, &fakeLocals, nil, nil)
 
 	if got, want := len(fakeStack), 0; got != want {
 		t.Errorf("fakeStack.Len = %d, want %d", got, want)
@@ -318,6 +318,91 @@ func TestAMD64LocalsSet(t *testing.T) {
 	}
 	if got, want := fakeLocals[4], uint64(11); got != want {
 		t.Errorf("fakeLocals[4] = %d, want %d", got, want)
+	}
+}
+
+func TestAMD64GlobalsGet(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.SkipNow()
+	}
+	allocator := &MMapAllocator{}
+	defer allocator.Close()
+	builder, err := asm.NewBuilder("amd64", 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	b := &AMD64Backend{}
+	regs := &dirtyRegs{}
+	b.emitPreamble(builder, regs)
+	b.emitWasmGlobalsLoad(builder, regs, currentInstruction{}, x86.REG_AX, 0)
+	b.emitWasmStackPush(builder, regs, currentInstruction{}, x86.REG_AX)
+	b.emitPostamble(builder, regs)
+	out := builder.Assemble()
+
+	nativeBlock, err := allocator.AllocateExec(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fakeStack := make([]uint64, 0, 5)
+	fakeGlobals := make([]uint64, 2, 2)
+	fakeGlobals[0] = 1335
+	nativeBlock.Invoke(&fakeStack, nil, &fakeGlobals, nil)
+
+	if got, want := len(fakeStack), 1; got != want {
+		t.Errorf("fakeStack.Len = %d, want %d", got, want)
+	}
+	if got, want := fakeStack[0], uint64(1335); got != want {
+		t.Errorf("fakeStack[0] = %d, want %d", got, want)
+	}
+}
+
+func TestAMD64GlobalsSet(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.SkipNow()
+	}
+	allocator := &MMapAllocator{}
+	defer allocator.Close()
+	builder, err := asm.NewBuilder("amd64", 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	b := &AMD64Backend{}
+	regs := &dirtyRegs{}
+	b.emitPreamble(builder, regs)
+	b.emitWasmGlobalsLoad(builder, regs, currentInstruction{}, x86.REG_AX, 0)
+	b.emitWasmGlobalsSave(builder, regs, currentInstruction{}, x86.REG_AX, 1)
+	b.emitWasmGlobalsSave(builder, regs, currentInstruction{}, x86.REG_AX, 2)
+	b.emitPushImmediate(builder, regs, currentInstruction{}, 11)
+	b.emitWasmStackLoad(builder, regs, currentInstruction{}, x86.REG_DX)
+	b.emitWasmGlobalsSave(builder, regs, currentInstruction{}, x86.REG_DX, 4)
+	b.emitPostamble(builder, regs)
+	out := builder.Assemble()
+
+	nativeBlock, err := allocator.AllocateExec(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fakeStack := make([]uint64, 0, 5)
+	fakeGlobals := make([]uint64, 5, 5)
+	fakeGlobals[0] = 1335
+	fakeGlobals[1] = 2
+	nativeBlock.Invoke(&fakeStack, nil, &fakeGlobals, nil)
+
+	if got, want := len(fakeStack), 0; got != want {
+		t.Errorf("fakeStack.Len = %d, want %d", got, want)
+	}
+	if got, want := fakeGlobals[1], uint64(1335); got != want {
+		t.Errorf("fakeGlobals[1] = %d, want %d", got, want)
+	}
+	if got, want := fakeGlobals[2], uint64(1335); got != want {
+		t.Errorf("fakeGlobals[2] = %d, want %d", got, want)
+	}
+	if got, want := fakeGlobals[4], uint64(11); got != want {
+		t.Errorf("fakeGlobals[4] = %d, want %d", got, want)
 	}
 }
 
@@ -349,13 +434,182 @@ func TestAMD64Select(t *testing.T) {
 	fakeStack[0] = 11
 	fakeStack[1] = 2
 	fakeStack[2] = 0
-	nativeBlock.Invoke(&fakeStack, &fakeLocals)
+	nativeBlock.Invoke(&fakeStack, &fakeLocals, nil, nil)
 
 	if got, want := len(fakeStack), 1; got != want {
 		t.Errorf("fakeStack.Len = %d, want %d", got, want)
 	}
 	if got, want := fakeStack[0], uint64(2); got != want {
 		t.Errorf("fakeStack[0] = %d, want %d", got, want)
+	}
+}
+
+func TestAMD64MemoryLoad(t *testing.T) {
+	tcs := []struct {
+		name   string
+		op     byte
+		mem    []byte
+		stack  []uint64
+		expect uint64
+		oob    bool
+	}{
+		{
+			name:   "i64 within bounds",
+			op:     ops.I64Load,
+			mem:    []byte{0, 0, 0, 55, 5, 0, 0, 0, 0, 0, 0},
+			stack:  []uint64{3},
+			expect: 1335,
+		},
+		{
+			name:  "i64 out of bounds",
+			op:    ops.I64Load,
+			oob:   true,
+			mem:   []byte{0, 0, 0, 55, 5, 0, 0, 0, 0, 0, 0},
+			stack: []uint64{4},
+		},
+		{
+			name:   "i32 within bounds",
+			op:     ops.I32Load,
+			mem:    []byte{43, 55, 5, 0, 0},
+			stack:  []uint64{1},
+			expect: 1335,
+		},
+		{
+			name:  "i32 out of bounds",
+			op:    ops.I32Load,
+			mem:   []byte{11, 55, 5, 0, 0},
+			stack: []uint64{2},
+			oob:   true,
+		},
+	}
+	if runtime.GOOS != "linux" {
+		t.SkipNow()
+	}
+	allocator := &MMapAllocator{}
+	defer allocator.Close()
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			builder, err := asm.NewBuilder("amd64", 64)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			b := &AMD64Backend{}
+			regs := &dirtyRegs{}
+			b.emitPreamble(builder, regs)
+			b.emitWasmMemoryLoad(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.op}}, x86.REG_AX, 0)
+			b.emitWasmStackPush(builder, regs, currentInstruction{}, x86.REG_AX)
+			b.emitPostamble(builder, regs)
+			out := builder.Assemble()
+			// debugPrintAsm(out)
+
+			nativeBlock, err := allocator.AllocateExec(out)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			result := nativeBlock.Invoke(&tc.stack, nil, nil, &tc.mem)
+			if !tc.oob {
+				if result.CompletionStatus() != CompletionOK {
+					t.Fatalf("Execution returned non-ok completion status: %v", result.CompletionStatus())
+				}
+
+				if got, want := len(tc.stack), 1; got != want {
+					t.Errorf("fakeStack.Len = %d, want %d", got, want)
+				}
+				if got, want := tc.stack[0], tc.expect; got != want {
+					t.Errorf("fakeStack[0] = %d, want %d", got, want)
+				}
+			} else {
+				if result.CompletionStatus() != CompletionBadBounds {
+					t.Errorf("Execution returned non-bounds completion status: %v", result.CompletionStatus())
+				}
+			}
+		})
+	}
+}
+
+func TestAMD64MemoryStore(t *testing.T) {
+	tcs := []struct {
+		name      string
+		op        byte
+		mem       []byte
+		stack     []uint64
+		expectMem []byte
+		oob       bool
+	}{
+		{
+			name:      "i64 within bounds",
+			op:        ops.I64Store,
+			mem:       []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+			stack:     []uint64{3, 1335},
+			expectMem: []byte{0, 0, 0, 55, 5, 0, 0, 0, 0, 0, 0},
+		},
+		{
+			name:  "i64 out of bounds",
+			op:    ops.I64Store,
+			mem:   []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+			stack: []uint64{3, 1335},
+			oob:   true,
+		},
+		{
+			name:      "i32 within bounds",
+			op:        ops.I32Store,
+			mem:       []byte{0, 0, 0, 0, 0, 0, 0},
+			stack:     []uint64{3, 1335},
+			expectMem: []byte{0, 0, 0, 55, 5, 0, 0},
+		},
+		{
+			name:  "i32 out of bounds",
+			op:    ops.I32Store,
+			mem:   []byte{0, 0, 0, 0, 0, 0},
+			stack: []uint64{3, 1335},
+			oob:   true,
+		},
+	}
+	if runtime.GOOS != "linux" {
+		t.SkipNow()
+	}
+	allocator := &MMapAllocator{}
+	defer allocator.Close()
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			builder, err := asm.NewBuilder("amd64", 64)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			b := &AMD64Backend{}
+			regs := &dirtyRegs{}
+			b.emitPreamble(builder, regs)
+			b.emitWasmMemoryStore(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.op}}, 0)
+			b.emitWasmStackPush(builder, regs, currentInstruction{}, x86.REG_AX)
+			b.emitPostamble(builder, regs)
+			out := builder.Assemble()
+			// debugPrintAsm(out)
+
+			nativeBlock, err := allocator.AllocateExec(out)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			result := nativeBlock.Invoke(&tc.stack, nil, nil, &tc.mem)
+			if !tc.oob {
+				if result.CompletionStatus() != CompletionOK {
+					t.Fatalf("Execution returned non-ok completion status: %v", result.CompletionStatus())
+				}
+
+				if got, want := tc.mem, tc.expectMem; !bytes.Equal(got, want) {
+					t.Errorf("mem] = %v, want %v", got, want)
+				}
+			} else {
+				if result.CompletionStatus() != CompletionBadBounds {
+					t.Errorf("Execution returned non-bounds completion status: %v", result.CompletionStatus())
+				}
+			}
+		})
 	}
 }
 
@@ -464,7 +718,7 @@ func TestAMD64OperationsI64(t *testing.T) {
 
 			fakeStack := make([]uint64, 0, 5)
 			fakeLocals := make([]uint64, 0, 0)
-			nativeBlock.Invoke(&fakeStack, &fakeLocals)
+			nativeBlock.Invoke(&fakeStack, &fakeLocals, nil, nil)
 
 			if got, want := len(fakeStack), 1; got != want {
 				t.Fatalf("fakeStack.Len = %d, want %d", got, want)
@@ -586,7 +840,7 @@ func TestDivOps(t *testing.T) {
 
 			fakeStack := make([]uint64, 0, 5)
 			fakeLocals := make([]uint64, 0, 0)
-			nativeBlock.Invoke(&fakeStack, &fakeLocals)
+			nativeBlock.Invoke(&fakeStack, &fakeLocals, nil, nil)
 
 			if got, want := len(fakeStack), 1; got != want {
 				t.Fatalf("fakeStack.Len = %d, want %d", got, want)
@@ -738,7 +992,7 @@ func TestComparisonOps64(t *testing.T) {
 
 			fakeStack := make([]uint64, 0, 5)
 			fakeLocals := make([]uint64, 0, 0)
-			nativeBlock.Invoke(&fakeStack, &fakeLocals)
+			nativeBlock.Invoke(&fakeStack, &fakeLocals, nil, nil)
 
 			if got, want := len(fakeStack), 1; got != want {
 				t.Fatalf("fakeStack.Len = %d, want %d", got, want)
@@ -943,7 +1197,7 @@ func TestAMD64OperationsI32(t *testing.T) {
 
 			fakeStack := make([]uint64, 0, 5)
 			fakeLocals := make([]uint64, 0, 0)
-			nativeBlock.Invoke(&fakeStack, &fakeLocals)
+			nativeBlock.Invoke(&fakeStack, &fakeLocals, nil, nil)
 
 			if got, want := len(fakeStack), 1; got != want {
 				t.Fatalf("fakeStack.Len = %d, want %d", got, want)
@@ -1163,7 +1417,7 @@ func TestAMD64OperationsF64(t *testing.T) {
 
 			fakeStack := make([]uint64, 0, 5)
 			fakeLocals := make([]uint64, 0, 0)
-			nativeBlock.Invoke(&fakeStack, &fakeLocals)
+			nativeBlock.Invoke(&fakeStack, &fakeLocals, nil, nil)
 
 			if got, want := len(fakeStack), 1; got != want {
 				t.Fatalf("fakeStack.Len = %d, want %d", got, want)
@@ -1413,7 +1667,7 @@ func TestComparisonOpsFloat(t *testing.T) {
 
 			fakeStack := make([]uint64, 0, 5)
 			fakeLocals := make([]uint64, 0, 0)
-			nativeBlock.Invoke(&fakeStack, &fakeLocals)
+			nativeBlock.Invoke(&fakeStack, &fakeLocals, nil, nil)
 
 			if got, want := len(fakeStack), 1; got != want {
 				t.Fatalf("fakeStack.Len = %d, want %d", got, want)
@@ -1513,7 +1767,7 @@ func TestAMD64IntToFloat(t *testing.T) {
 
 			fakeStack := make([]uint64, 0, 5)
 			fakeLocals := make([]uint64, 0, 0)
-			nativeBlock.Invoke(&fakeStack, &fakeLocals)
+			nativeBlock.Invoke(&fakeStack, &fakeLocals, nil, nil)
 
 			if got, want := len(fakeStack), 1; got != want {
 				t.Fatalf("fakeStack.Len = %d, want %d", got, want)
