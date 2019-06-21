@@ -41,7 +41,7 @@ type Instr struct {
 	Branches []StackInfo
 }
 
-// StackInfo stores details about a new stack created or unwinded by an instruction.
+// StackInfo stores details about a new stack created or unwound by an instruction.
 type StackInfo struct {
 	StackTopDiff int64 // The difference between the stack depths at the end of the block
 	PreserveTop  bool  // Whether the value on the top of the stack should be preserved while unwinding
@@ -102,7 +102,7 @@ func NewDisassembly(fn wasm.Function, module *wasm.Module) (*Disassembly, error)
 	// array for the root stack
 	blockPolymorphicOps := [][]int{{}}
 	// a stack of current execution stack depth values, so that the depth for each
-	// stack is maintained indepepdently for calculating discard values
+	// stack is maintained independently for calculating discard values
 	stackDepths := &stack.Stack{}
 	stackDepths.Push(0)
 	blockIndices := &stack.Stack{} // a stack of indices to operators which start new blocks

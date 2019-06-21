@@ -24,7 +24,7 @@ func (vm *VM) inBounds(offset int) bool {
 	return int(addr)+offset < len(vm.memory)
 }
 
-// curMem returns a slice to the memeory segment pointed to by
+// curMem returns a slice to the memory segment pointed to by
 // the current base address on the bytecode stream.
 func (vm *VM) curMem() []byte {
 	return vm.memory[vm.fetchBaseAddr():]

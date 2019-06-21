@@ -23,13 +23,13 @@ type mockVM struct {
 
 	code *bytes.Reader
 
-	polymorphic bool    // whether the base implict block has a polymorphic stack
+	polymorphic bool    // whether the base implicit block has a polymorphic stack
 	blocks      []block // a stack of encountered blocks
 
 	curFunc *wasm.FunctionSig
 }
 
-// a block reprsents an instruction sequence preceeded by a control flow operator
+// a block represents an instruction sequence preceded by a control flow operator
 // it is used to verify that the block signature set by the operator is the correct
 // one when the block ends
 type block struct {
@@ -102,8 +102,8 @@ func (vm *mockVM) canBranch(depth int) error {
 	// on the stack.
 	if block == nil {
 		if depth == len(vm.blocks) {
-			//equivalent to a `return', as the function
-			//body is an "implicit" block
+			// equivalent to a `return', as the function
+			// body is an "implicit" block
 			if len(vm.curFunc.ReturnTypes) != 0 {
 				blockType = wasm.BlockType(vm.curFunc.ReturnTypes[0])
 			}
@@ -198,7 +198,7 @@ func (vm *mockVM) adjustStack(op ops.Op) error {
 
 // setPolymorphic sets the current block as having a polymorphic stack
 // blocks created under it will be polymorphic too. All type-checking
-// is ignored in a polymorhpic stack.
+// is ignored in a polymorphic stack.
 // (See https://github.com/WebAssembly/design/blob/27ac254c854994103c24834a994be16f74f54186/Semantics.md#validation)
 func (vm *mockVM) setPolymorphic() {
 	if len(vm.blocks) == 0 {
