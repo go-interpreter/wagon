@@ -18,8 +18,16 @@ import (
 var rhsConstOptimizable = map[byte]bool{
 	ops.I64Add:  true,
 	ops.I64Sub:  true,
+	ops.I32Add:  true,
+	ops.I32Sub:  true,
 	ops.I64Shl:  true,
 	ops.I64ShrU: true,
+	ops.I64And:  true,
+	ops.I32And:  true,
+	ops.I64Or:   true,
+	ops.I32Or:   true,
+	ops.I64Xor:  true,
+	ops.I32Xor:  true,
 }
 
 // dirtyRegs tracks registers which hold values that need to
@@ -227,17 +235,15 @@ func (b *AMD64Backend) Build(candidate CompilationCandidate, code []byte, meta *
 				}
 				i++
 				continue
-			case nextInst.Op == ops.SetLocal:
-				prog := builder.NewProg()
-				prog.As = x86.AMOVQ
-				prog.To.Type = obj.TYPE_REG
-				prog.To.Reg = x86.REG_AX
-				prog.From.Type = obj.TYPE_CONST
-				prog.From.Offset = int64(imm)
-				builder.AddInstruction(prog)
-				b.emitWasmLocalsSave(builder, &regs, nextCI, x86.REG_AX, b.readIntImmediate(code, nextInst))
-				i++
-				continue
+			default:
+				switch nextInst.Op {
+				case ops.SetLocal, ops.SetGlobal, ops.I64Store, ops.I32Store, ops.F64Store, ops.F32Store:
+					if err := b.emitFusedConstStore(builder, &regs, code, nextInst, ci, nextCI, imm); err != nil {
+						return nil, fmt.Errorf("compile: amd64.emitFusedConstStore: %v", err)
+					}
+					i++
+					continue
+				}
 			}
 		}
 
@@ -262,7 +268,8 @@ func (b *AMD64Backend) Build(candidate CompilationCandidate, code []byte, meta *
 			}
 			b.emitWasmStackPush(builder, &regs, ci, x86.REG_AX)
 		case ops.I64Store, ops.I32Store, ops.F64Store, ops.F32Store:
-			if err := b.emitWasmMemoryStore(builder, &regs, ci, b.readIntImmediate(code, inst)); err != nil {
+			b.emitWasmStackLoad(builder, &regs, ci, x86.REG_DX)
+			if err := b.emitWasmMemoryStore(builder, &regs, ci, b.readIntImmediate(code, inst), x86.REG_DX); err != nil {
 				return nil, fmt.Errorf("compile: amd64.emitWasmMemoryStore: %v", err)
 			}
 		case ops.I64Add, ops.I32Add, ops.I64Sub, ops.I32Sub, ops.I64Mul, ops.I32Mul,
@@ -318,8 +325,12 @@ func (b *AMD64Backend) Build(candidate CompilationCandidate, code []byte, meta *
 	}
 	b.emitPostamble(builder, &regs)
 
+	if err := peepholeOptimizeAMD64(builder); err != nil {
+		return nil, fmt.Errorf("compile: peepholeOptimizeAMD64() failed: %v", err)
+	}
+
 	out := builder.Assemble()
-	// debugPrintAsm(out)
+	//debugPrintAsm(out)
 	return out, nil
 }
 
@@ -342,6 +353,28 @@ func (b *AMD64Backend) paramsForMemoryOp(op byte) (size uint, inst obj.As) {
 		return 4, x86.AMOVL
 	}
 	panic("unreachable")
+}
+
+func (b *AMD64Backend) emitFusedConstStore(builder *asm.Builder, regs *dirtyRegs, code []byte, nextInst InstructionMetadata, ci, nextCI currentInstruction, imm uint64) error {
+	prog := builder.NewProg()
+	prog.As = x86.AMOVQ
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_AX
+	prog.From.Type = obj.TYPE_CONST
+	prog.From.Offset = int64(imm)
+	builder.AddInstruction(prog)
+
+	switch nextInst.Op {
+	case ops.SetLocal:
+		b.emitWasmLocalsSave(builder, regs, nextCI, x86.REG_AX, b.readIntImmediate(code, nextInst))
+	case ops.SetGlobal:
+		b.emitWasmGlobalsSave(builder, regs, nextCI, x86.REG_AX, b.readIntImmediate(code, nextInst))
+	case ops.I64Store, ops.I32Store, ops.F64Store, ops.F32Store:
+		b.emitWasmMemoryStore(builder, regs, nextCI, b.readIntImmediate(code, nextInst), x86.REG_AX)
+	default:
+		return fmt.Errorf("unexpected op: %v", nextInst.Op)
+	}
+	return nil
 }
 
 func (b *AMD64Backend) emitWasmMemoryLoad(builder *asm.Builder, regs *dirtyRegs, ci currentInstruction, outReg int16, base uint64) error {
@@ -487,8 +520,7 @@ func maxuint64() uint64 {
 	return math.MaxUint64
 }
 
-func (b *AMD64Backend) emitWasmMemoryStore(builder *asm.Builder, regs *dirtyRegs, ci currentInstruction, base uint64) error {
-	// <load value> --> rdx
+func (b *AMD64Backend) emitWasmMemoryStore(builder *asm.Builder, regs *dirtyRegs, ci currentInstruction, base uint64, inReg int16) error {
 	// <load offset> --> r9
 	// addq    r9, $(base)
 	// movq   rcx, r9
@@ -503,8 +535,6 @@ func (b *AMD64Backend) emitWasmMemoryStore(builder *asm.Builder, regs *dirtyRegs
 	// movq   [rbx], rdx
 	movSize, movOp := b.paramsForMemoryOp(ci.inst.Op)
 
-	// Load value from stack.
-	b.emitWasmStackLoad(builder, regs, ci, x86.REG_DX)
 	// Load offset from stack.
 	b.emitWasmStackLoad(builder, regs, ci, x86.REG_R9)
 	// addq r9, $(base)
@@ -583,7 +613,7 @@ func (b *AMD64Backend) emitWasmMemoryStore(builder *asm.Builder, regs *dirtyRegs
 	prog = builder.NewProg()
 	prog.As = movOp
 	prog.From.Type = obj.TYPE_REG
-	prog.From.Reg = x86.REG_DX
+	prog.From.Reg = inReg
 	prog.To.Type = obj.TYPE_MEM
 	prog.To.Reg = x86.REG_BX
 	builder.AddInstruction(prog)
@@ -1171,10 +1201,26 @@ func (b *AMD64Backend) emitRHSConstOptimizedInstruction(builder *asm.Builder, re
 		prog.As = x86.AADDQ
 	case ops.I64Sub:
 		prog.As = x86.ASUBQ
+	case ops.I32Add:
+		prog.As = x86.AADDL
+	case ops.I32Sub:
+		prog.As = x86.ASUBL
 	case ops.I64Shl:
 		prog.As = x86.ASHLQ
 	case ops.I64ShrU:
 		prog.As = x86.ASHRQ
+	case ops.I64And:
+		prog.As = x86.AANDQ
+	case ops.I32And:
+		prog.As = x86.AANDL
+	case ops.I64Or:
+		prog.As = x86.AORQ
+	case ops.I32Or:
+		prog.As = x86.AORL
+	case ops.I64Xor:
+		prog.As = x86.AXORQ
+	case ops.I32Xor:
+		prog.As = x86.AXORL
 	default:
 		return fmt.Errorf("cannot handle op: %x", ci.inst.Op)
 	}

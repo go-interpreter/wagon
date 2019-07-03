@@ -584,7 +584,8 @@ func TestAMD64MemoryStore(t *testing.T) {
 			b := &AMD64Backend{}
 			regs := &dirtyRegs{}
 			b.emitPreamble(builder, regs)
-			b.emitWasmMemoryStore(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.op}}, 0)
+			b.emitWasmStackLoad(builder, regs, currentInstruction{}, x86.REG_DX)
+			b.emitWasmMemoryStore(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.op}}, 0, x86.REG_DX)
 			b.emitWasmStackPush(builder, regs, currentInstruction{}, x86.REG_AX)
 			b.emitPostamble(builder, regs)
 			out := builder.Assemble()
@@ -608,6 +609,258 @@ func TestAMD64MemoryStore(t *testing.T) {
 				if result.CompletionStatus() != CompletionBadBounds {
 					t.Errorf("Execution returned non-bounds completion status: %v", result.CompletionStatus())
 				}
+			}
+		})
+	}
+}
+
+func TestAMD64FusedConstStore(t *testing.T) {
+	tcs := []struct {
+		name         string
+		op           byte
+		stack        []uint64
+		expectLocal  []uint64
+		expectGlobal []uint64
+		expectMem    []byte
+	}{
+		{
+			name:         "set local",
+			op:           ops.SetLocal,
+			stack:        nil,
+			expectLocal:  []uint64{5},
+			expectGlobal: []uint64{0},
+			expectMem:    []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		},
+		{
+			name:         "set global",
+			op:           ops.SetGlobal,
+			stack:        nil,
+			expectLocal:  []uint64{0},
+			expectGlobal: []uint64{5},
+			expectMem:    []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		},
+		{
+			name:         "store i64",
+			op:           ops.I64Store,
+			stack:        []uint64{0},
+			expectLocal:  []uint64{0},
+			expectGlobal: []uint64{0},
+			expectMem:    []byte{5, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		},
+		{
+			name:         "store f64",
+			op:           ops.F64Store,
+			stack:        []uint64{0},
+			expectLocal:  []uint64{0},
+			expectGlobal: []uint64{0},
+			expectMem:    []byte{5, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		},
+		{
+			name:         "store i64 offset",
+			op:           ops.I64Store,
+			stack:        []uint64{1},
+			expectLocal:  []uint64{0},
+			expectGlobal: []uint64{0},
+			expectMem:    []byte{0, 5, 0, 0, 0, 0, 0, 0, 0, 0},
+		},
+		{
+			name:         "store i32",
+			op:           ops.I32Store,
+			stack:        []uint64{0},
+			expectLocal:  []uint64{0},
+			expectGlobal: []uint64{0},
+			expectMem:    []byte{5, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		},
+		{
+			name:         "store f32",
+			op:           ops.F32Store,
+			stack:        []uint64{0},
+			expectLocal:  []uint64{0},
+			expectGlobal: []uint64{0},
+			expectMem:    []byte{5, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		},
+		{
+			name:         "store i32 offset",
+			op:           ops.I32Store,
+			stack:        []uint64{5},
+			expectLocal:  []uint64{0},
+			expectGlobal: []uint64{0},
+			expectMem:    []byte{0, 0, 0, 0, 0, 5, 0, 0, 0, 0},
+		},
+	}
+	if runtime.GOOS != "linux" {
+		t.SkipNow()
+	}
+	allocator := &MMapAllocator{}
+	defer allocator.Close()
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			b := &AMD64Backend{}
+			out, err := b.Build(CompilationCandidate{
+				EndInstruction: 2,
+			}, []byte{ops.I64Const, 5, 0, 0, 0, tc.op, 0, 0, 0, 0}, &BytecodeMetadata{
+				Instructions: []InstructionMetadata{
+					{Op: ops.I64Const, Size: 5},
+					{Op: tc.op, Start: 5, Size: 5},
+				},
+			})
+			if err != nil {
+				t.Fatalf("b.Build() failed: %v", err)
+			}
+			// debugPrintAsm(out)
+
+			nativeBlock, err := allocator.AllocateExec(out)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			fakeLocals := make([]uint64, 1)
+			fakeGlobals := make([]uint64, 1)
+			fakeMem := make([]byte, 10)
+			result := nativeBlock.Invoke(&tc.stack, &fakeLocals, &fakeGlobals, &fakeMem)
+			if result.CompletionStatus() != CompletionOK {
+				t.Fatalf("Execution returned non-ok completion status: %v", result.CompletionStatus())
+			}
+
+			if got, want := fakeMem, tc.expectMem; !bytes.Equal(got, want) {
+				t.Errorf("mem = %v, want %v", got, want)
+			}
+			if got, want := fakeLocals[0], tc.expectLocal[0]; got != want {
+				t.Errorf("locals[0] = %v, want %v", got, want)
+			}
+			if got, want := fakeGlobals[0], tc.expectGlobal[0]; got != want {
+				t.Errorf("globals[0] = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestAMD64RHSConstOptimizedBinOp(t *testing.T) {
+	tcs := []struct {
+		name        string
+		op          byte
+		constVal    uint64
+		stack       []uint64
+		expectStack []uint64
+	}{
+		{
+			name:        "add i64",
+			op:          ops.I64Add,
+			constVal:    11,
+			stack:       []uint64{3},
+			expectStack: []uint64{14},
+		},
+		{
+			name:        "sub i64",
+			op:          ops.I64Sub,
+			constVal:    1,
+			stack:       []uint64{3},
+			expectStack: []uint64{2},
+		},
+		{
+			name:        "add i32",
+			op:          ops.I32Add,
+			constVal:    11,
+			stack:       []uint64{3},
+			expectStack: []uint64{14},
+		},
+		{
+			name:        "sub i32",
+			op:          ops.I32Sub,
+			constVal:    1,
+			stack:       []uint64{3},
+			expectStack: []uint64{2},
+		},
+		{
+			name:        "shl i64",
+			op:          ops.I64Shl,
+			constVal:    2,
+			stack:       []uint64{1},
+			expectStack: []uint64{4},
+		},
+		{
+			name:        "shr i64",
+			op:          ops.I64ShrU,
+			constVal:    2,
+			stack:       []uint64{64},
+			expectStack: []uint64{16},
+		},
+		{
+			name:        "and i64",
+			op:          ops.I64And,
+			constVal:    3,
+			stack:       []uint64{1},
+			expectStack: []uint64{1},
+		},
+		{
+			name:        "and i32",
+			op:          ops.I32And,
+			constVal:    3,
+			stack:       []uint64{1},
+			expectStack: []uint64{1},
+		},
+		{
+			name:        "or i64",
+			op:          ops.I64Or,
+			constVal:    2,
+			stack:       []uint64{1},
+			expectStack: []uint64{3},
+		},
+		{
+			name:        "or i32",
+			op:          ops.I32Or,
+			constVal:    2,
+			stack:       []uint64{1},
+			expectStack: []uint64{3},
+		},
+		{
+			name:        "xor i64",
+			op:          ops.I64Xor,
+			constVal:    1,
+			stack:       []uint64{1 << 33},
+			expectStack: []uint64{1<<33 + 1},
+		},
+		{
+			name:        "xor i32",
+			op:          ops.I32Xor,
+			constVal:    1,
+			stack:       []uint64{1 << 33},
+			expectStack: []uint64{1},
+		},
+	}
+	if runtime.GOOS != "linux" {
+		t.SkipNow()
+	}
+	allocator := &MMapAllocator{}
+	defer allocator.Close()
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			builder, err := asm.NewBuilder("amd64", 64)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			b := &AMD64Backend{}
+			regs := &dirtyRegs{}
+			b.emitPreamble(builder, regs)
+			b.emitRHSConstOptimizedInstruction(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.op}}, tc.constVal)
+			b.emitPostamble(builder, regs)
+			out := builder.Assemble()
+			// debugPrintAsm(out)
+
+			nativeBlock, err := allocator.AllocateExec(out)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			result := nativeBlock.Invoke(&tc.stack, nil, nil, nil)
+			if result.CompletionStatus() != CompletionOK {
+				t.Fatalf("Execution returned non-ok completion status: %v", result.CompletionStatus())
+			}
+			if tc.stack[0] != tc.expectStack[0] {
+				t.Errorf("stack[0] = %v, want %v", tc.stack[0], tc.expectStack[0])
 			}
 		})
 	}
