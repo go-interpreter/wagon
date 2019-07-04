@@ -29,12 +29,13 @@ const (
 )
 
 type testCase struct {
-	Function     string   `json:"function"`
-	Args         []string `json:"args"`
-	Return       string   `json:"return"`
-	Trap         string   `json:"trap"`
-	RecoverPanic bool     `json:"recoverpanic,omitempty"`
-	ErrorMsg     string   `json:"errormsg"`
+	Function          string   `json:"function"`
+	Args              []string `json:"args"`
+	Return            string   `json:"return"`
+	Trap              string   `json:"trap"`
+	RecoverPanic      bool     `json:"recoverpanic,omitempty"`
+	ErrorMsg          string   `json:"errormsg"`
+	MustNativeCompile []int    `json:"must_native_compile,omitempty"`
 }
 
 type file struct {
@@ -278,6 +279,20 @@ func runTest(fileName string, testCases []testCase, t testing.TB, nativeBackend 
 	for _, testCase := range testCases {
 		var expected interface{}
 
+		if nativeBackend && len(testCase.MustNativeCompile) > 0 {
+			cStats := vm.CompileStats()
+			for _, oc := range testCase.MustNativeCompile {
+				opCode := byte(oc)
+				if _, exists := cStats.Ops[opCode]; !exists {
+					t.Errorf("%s: Op %x is not part of the instruction stream", testCase.Function, oc)
+					continue
+				}
+				if cStats.Ops[opCode].Compiled == 0 {
+					t.Errorf("%s: Op %x was never compiled (stats = %+v)", testCase.Function, oc, cStats.Ops[opCode])
+				}
+			}
+		}
+
 		index := module.Export.Entries[testCase.Function].Index
 		args := parseArgs(testCase.Args)
 
@@ -374,6 +389,10 @@ func testModules(t *testing.T, dir string, repeat bool) {
 		})
 		t.Run(fileName+" native", func(t *testing.T) {
 			t.Parallel()
+			if runtime.GOARCH != "amd64" || runtime.GOOS != "linux" {
+				t.SkipNow()
+			}
+
 			path, err := filepath.Abs(fileName)
 			if err != nil {
 				t.Fatal(err)

@@ -167,3 +167,48 @@ func (vm *VM) nativeCodeInvocation(asmIndex uint32) {
 	}
 	vm.ctx.pc = int64(block.resumePC)
 }
+
+// CompileStats returns statistics about native compilation performed on
+// the VM.
+func (vm *VM) CompileStats() NativeCompileStats {
+	out := NativeCompileStats{
+		Ops: map[byte]*OpStats{},
+	}
+
+	for i := range vm.funcs {
+		if _, isGoFunc := vm.funcs[i].(*goFunction); isGoFunc {
+			continue
+		}
+
+		fn := vm.funcs[i].(compiledFunction)
+		out.NumCompiledBlocks += len(fn.asm)
+
+		for _, inst := range fn.codeMeta.Instructions {
+			if _, exists := out.Ops[inst.Op]; !exists {
+				out.Ops[inst.Op] = &OpStats{}
+			}
+
+			// Instructions which are native-compiled are re-written to the
+			// ops.WagonNativeExec opcode, so a mismatch indicates native compilation.
+			if fn.code[inst.Start] == inst.Op {
+				out.Ops[inst.Op].Interpreted++
+			} else {
+				out.Ops[inst.Op].Compiled++
+			}
+		}
+	}
+
+	return out
+}
+
+type OpStats struct {
+	Interpreted int
+	Compiled    int
+}
+
+// NativeCompileStats encapsulates statistics about any native
+// compilation performed on the VM.
+type NativeCompileStats struct {
+	Ops               map[byte]*OpStats
+	NumCompiledBlocks int
+}
