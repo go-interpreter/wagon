@@ -62,8 +62,7 @@ func TestAMD64StackPush(t *testing.T) {
 	}
 
 	b := &AMD64Backend{EmitBoundsChecks: true}
-	regs := &dirtyRegs{}
-	b.emitPreamble(builder, regs)
+	b.emitPreamble(builder)
 	mov := builder.NewProg()
 	mov.As = x86.AMOVQ
 	mov.From.Type = obj.TYPE_CONST
@@ -71,7 +70,7 @@ func TestAMD64StackPush(t *testing.T) {
 	mov.To.Type = obj.TYPE_REG
 	mov.To.Reg = x86.REG_AX
 	builder.AddInstruction(mov)
-	b.emitWasmStackPush(builder, regs, currentInstruction{}, x86.REG_AX)
+	b.emitSymbolicPushFromReg(builder, currentInstruction{}, x86.REG_AX)
 	mov = builder.NewProg()
 	mov.As = x86.AMOVQ
 	mov.From.Type = obj.TYPE_CONST
@@ -79,9 +78,10 @@ func TestAMD64StackPush(t *testing.T) {
 	mov.To.Type = obj.TYPE_REG
 	mov.To.Reg = x86.REG_AX
 	builder.AddInstruction(mov)
-	b.emitWasmStackPush(builder, regs, currentInstruction{}, x86.REG_AX)
+	b.emitSymbolicPushFromReg(builder, currentInstruction{}, x86.REG_AX)
 
-	b.emitPostamble(builder, regs)
+	b.emitPostamble(builder)
+	b.lowerAMD64(builder)
 	out := builder.Assemble()
 
 	// debugPrintAsm(out)
@@ -124,12 +124,12 @@ func TestAMD64StackPop(t *testing.T) {
 	}
 
 	b := &AMD64Backend{EmitBoundsChecks: true}
-	regs := &dirtyRegs{}
-	b.emitPreamble(builder, regs)
-	b.emitWasmStackLoad(builder, regs, currentInstruction{}, x86.REG_AX)
-	b.emitWasmStackLoad(builder, regs, currentInstruction{}, x86.REG_BX)
-	b.emitWasmStackPush(builder, regs, currentInstruction{}, x86.REG_AX)
-	b.emitPostamble(builder, regs)
+	b.emitPreamble(builder)
+	b.emitSymbolicPopToReg(builder, currentInstruction{}, x86.REG_AX)
+	b.emitSymbolicPopToReg(builder, currentInstruction{}, x86.REG_BX)
+	b.emitSymbolicPushFromReg(builder, currentInstruction{}, x86.REG_AX)
+	b.emitPostamble(builder)
+	b.lowerAMD64(builder)
 	out := builder.Assemble()
 
 	nativeBlock, err := allocator.AllocateExec(out)
@@ -164,13 +164,13 @@ func TestAMD64ExitSignal(t *testing.T) {
 	}
 
 	b := &AMD64Backend{EmitBoundsChecks: true}
-	regs := &dirtyRegs{}
 	fakeStack := make([]uint64, 1, 2)
 	fakeLocals := make([]uint64, 2, 2)
 
 	// Test CompletionOK.
-	b.emitPreamble(builder, regs)
-	b.emitPostamble(builder, regs)
+	b.emitPreamble(builder)
+	b.emitPostamble(builder)
+	b.lowerAMD64(builder)
 	out := builder.Assemble()
 	nativeBlock, err := allocator.AllocateExec(out)
 	if err != nil {
@@ -190,13 +190,13 @@ func TestAMD64ExitSignal(t *testing.T) {
 		t.Fatal(err)
 	}
 	b = &AMD64Backend{EmitBoundsChecks: true}
-	regs = &dirtyRegs{}
 	fakeStack = make([]uint64, 1, 2)
-	b.emitPreamble(builder, regs)
-	b.emitWasmStackLoad(builder, regs, currentInstruction{idx: 1}, x86.REG_BX)
-	b.emitWasmStackLoad(builder, regs, currentInstruction{idx: 2}, x86.REG_BX)
-	b.emitWasmStackLoad(builder, regs, currentInstruction{idx: 3}, x86.REG_BX)
-	b.emitPostamble(builder, regs)
+	b.emitPreamble(builder)
+	b.emitSymbolicPopToReg(builder, currentInstruction{idx: 1}, x86.REG_BX)
+	b.emitSymbolicPopToReg(builder, currentInstruction{idx: 2}, x86.REG_BX)
+	b.emitSymbolicPopToReg(builder, currentInstruction{idx: 3}, x86.REG_BX)
+	b.emitPostamble(builder)
+	b.lowerAMD64(builder)
 	out = builder.Assemble()
 	if nativeBlock, err = allocator.AllocateExec(out); err != nil {
 		t.Fatal(err)
@@ -215,13 +215,13 @@ func TestAMD64ExitSignal(t *testing.T) {
 		t.Fatal(err)
 	}
 	b = &AMD64Backend{EmitBoundsChecks: true}
-	regs = &dirtyRegs{}
 	fakeStack = make([]uint64, 0, 2)
-	b.emitPreamble(builder, regs)
-	b.emitWasmStackPush(builder, regs, currentInstruction{idx: 1}, x86.REG_BX)
-	b.emitWasmStackPush(builder, regs, currentInstruction{idx: 2}, x86.REG_BX)
-	b.emitWasmStackPush(builder, regs, currentInstruction{idx: 3}, x86.REG_BX)
-	b.emitPostamble(builder, regs)
+	b.emitPreamble(builder)
+	b.emitSymbolicPushFromReg(builder, currentInstruction{idx: 1}, x86.REG_BX)
+	b.emitSymbolicPushFromReg(builder, currentInstruction{idx: 2}, x86.REG_BX)
+	b.emitSymbolicPushFromReg(builder, currentInstruction{idx: 3}, x86.REG_BX)
+	b.emitPostamble(builder)
+	b.lowerAMD64(builder)
 	out = builder.Assemble()
 	if nativeBlock, err = allocator.AllocateExec(out); err != nil {
 		t.Fatal(err)
@@ -247,14 +247,14 @@ func TestAMD64LocalsGet(t *testing.T) {
 	}
 
 	b := &AMD64Backend{}
-	regs := &dirtyRegs{}
-	b.emitPreamble(builder, regs)
-	b.emitWasmLocalsLoad(builder, regs, currentInstruction{}, x86.REG_AX, 0)
-	b.emitWasmStackPush(builder, regs, currentInstruction{}, x86.REG_AX)
-	b.emitWasmLocalsLoad(builder, regs, currentInstruction{}, x86.REG_AX, 1)
-	b.emitWasmStackPush(builder, regs, currentInstruction{}, x86.REG_AX)
-	b.emitBinaryI64(builder, regs, currentInstruction{inst: InstructionMetadata{Op: ops.I64Add}})
-	b.emitPostamble(builder, regs)
+	b.emitPreamble(builder)
+	b.emitWasmLocalsLoad(builder, currentInstruction{}, x86.REG_AX, 0)
+	b.emitSymbolicPushFromReg(builder, currentInstruction{}, x86.REG_AX)
+	b.emitWasmLocalsLoad(builder, currentInstruction{}, x86.REG_AX, 1)
+	b.emitSymbolicPushFromReg(builder, currentInstruction{}, x86.REG_AX)
+	b.emitBinaryI64(builder, currentInstruction{inst: InstructionMetadata{Op: ops.I64Add}})
+	b.emitPostamble(builder)
+	b.lowerAMD64(builder)
 	out := builder.Assemble()
 
 	nativeBlock, err := allocator.AllocateExec(out)
@@ -288,15 +288,15 @@ func TestAMD64LocalsSet(t *testing.T) {
 	}
 
 	b := &AMD64Backend{}
-	regs := &dirtyRegs{}
-	b.emitPreamble(builder, regs)
-	b.emitWasmLocalsLoad(builder, regs, currentInstruction{}, x86.REG_AX, 0)
-	b.emitWasmLocalsSave(builder, regs, currentInstruction{}, x86.REG_AX, 1)
-	b.emitWasmLocalsSave(builder, regs, currentInstruction{}, x86.REG_AX, 2)
-	b.emitPushImmediate(builder, regs, currentInstruction{}, 11)
-	b.emitWasmStackLoad(builder, regs, currentInstruction{}, x86.REG_DX)
-	b.emitWasmLocalsSave(builder, regs, currentInstruction{}, x86.REG_DX, 4)
-	b.emitPostamble(builder, regs)
+	b.emitPreamble(builder)
+	b.emitWasmLocalsLoad(builder, currentInstruction{}, x86.REG_AX, 0)
+	b.emitWasmLocalsSave(builder, currentInstruction{}, x86.REG_AX, 1)
+	b.emitWasmLocalsSave(builder, currentInstruction{}, x86.REG_AX, 2)
+	b.emitPushImmediate(builder, currentInstruction{}, 11)
+	b.emitSymbolicPopToReg(builder, currentInstruction{}, x86.REG_DX)
+	b.emitWasmLocalsSave(builder, currentInstruction{}, x86.REG_DX, 4)
+	b.emitPostamble(builder)
+	b.lowerAMD64(builder)
 	out := builder.Assemble()
 
 	nativeBlock, err := allocator.AllocateExec(out)
@@ -333,11 +333,11 @@ func TestAMD64GlobalsGet(t *testing.T) {
 	}
 
 	b := &AMD64Backend{}
-	regs := &dirtyRegs{}
-	b.emitPreamble(builder, regs)
-	b.emitWasmGlobalsLoad(builder, regs, currentInstruction{}, x86.REG_AX, 0)
-	b.emitWasmStackPush(builder, regs, currentInstruction{}, x86.REG_AX)
-	b.emitPostamble(builder, regs)
+	b.emitPreamble(builder)
+	b.emitWasmGlobalsLoad(builder, currentInstruction{}, x86.REG_AX, 0)
+	b.emitSymbolicPushFromReg(builder, currentInstruction{}, x86.REG_AX)
+	b.emitPostamble(builder)
+	b.lowerAMD64(builder)
 	out := builder.Assemble()
 
 	nativeBlock, err := allocator.AllocateExec(out)
@@ -370,15 +370,15 @@ func TestAMD64GlobalsSet(t *testing.T) {
 	}
 
 	b := &AMD64Backend{}
-	regs := &dirtyRegs{}
-	b.emitPreamble(builder, regs)
-	b.emitWasmGlobalsLoad(builder, regs, currentInstruction{}, x86.REG_AX, 0)
-	b.emitWasmGlobalsSave(builder, regs, currentInstruction{}, x86.REG_AX, 1)
-	b.emitWasmGlobalsSave(builder, regs, currentInstruction{}, x86.REG_AX, 2)
-	b.emitPushImmediate(builder, regs, currentInstruction{}, 11)
-	b.emitWasmStackLoad(builder, regs, currentInstruction{}, x86.REG_DX)
-	b.emitWasmGlobalsSave(builder, regs, currentInstruction{}, x86.REG_DX, 4)
-	b.emitPostamble(builder, regs)
+	b.emitPreamble(builder)
+	b.emitWasmGlobalsLoad(builder, currentInstruction{}, x86.REG_AX, 0)
+	b.emitWasmGlobalsSave(builder, currentInstruction{}, x86.REG_AX, 1)
+	b.emitWasmGlobalsSave(builder, currentInstruction{}, x86.REG_AX, 2)
+	b.emitPushImmediate(builder, currentInstruction{}, 11)
+	b.emitSymbolicPopToReg(builder, currentInstruction{}, x86.REG_DX)
+	b.emitWasmGlobalsSave(builder, currentInstruction{}, x86.REG_DX, 4)
+	b.emitPostamble(builder)
+	b.lowerAMD64(builder)
 	out := builder.Assemble()
 
 	nativeBlock, err := allocator.AllocateExec(out)
@@ -418,10 +418,10 @@ func TestAMD64Select(t *testing.T) {
 	}
 
 	b := &AMD64Backend{}
-	regs := &dirtyRegs{}
-	b.emitPreamble(builder, regs)
-	b.emitSelect(builder, regs, currentInstruction{})
-	b.emitPostamble(builder, regs)
+	b.emitPreamble(builder)
+	b.emitSelect(builder, currentInstruction{})
+	b.emitPostamble(builder)
+	b.lowerAMD64(builder)
 	out := builder.Assemble()
 
 	nativeBlock, err := allocator.AllocateExec(out)
@@ -496,11 +496,11 @@ func TestAMD64MemoryLoad(t *testing.T) {
 			}
 
 			b := &AMD64Backend{}
-			regs := &dirtyRegs{}
-			b.emitPreamble(builder, regs)
-			b.emitWasmMemoryLoad(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.op}}, x86.REG_AX, 0)
-			b.emitWasmStackPush(builder, regs, currentInstruction{}, x86.REG_AX)
-			b.emitPostamble(builder, regs)
+			b.emitPreamble(builder)
+			b.emitWasmMemoryLoad(builder, currentInstruction{inst: InstructionMetadata{Op: tc.op}}, x86.REG_AX, 0)
+			b.emitSymbolicPushFromReg(builder, currentInstruction{}, x86.REG_AX)
+			b.emitPostamble(builder)
+			b.lowerAMD64(builder)
 			out := builder.Assemble()
 			// debugPrintAsm(out)
 
@@ -582,12 +582,12 @@ func TestAMD64MemoryStore(t *testing.T) {
 			}
 
 			b := &AMD64Backend{}
-			regs := &dirtyRegs{}
-			b.emitPreamble(builder, regs)
-			b.emitWasmStackLoad(builder, regs, currentInstruction{}, x86.REG_DX)
-			b.emitWasmMemoryStore(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.op}}, 0, x86.REG_DX)
-			b.emitWasmStackPush(builder, regs, currentInstruction{}, x86.REG_AX)
-			b.emitPostamble(builder, regs)
+			b.emitPreamble(builder)
+			b.emitSymbolicPopToReg(builder, currentInstruction{}, x86.REG_DX)
+			b.emitWasmMemoryStore(builder, currentInstruction{inst: InstructionMetadata{Op: tc.op}}, 0, x86.REG_DX)
+			b.emitSymbolicPushFromReg(builder, currentInstruction{}, x86.REG_AX)
+			b.emitPostamble(builder)
+			b.lowerAMD64(builder)
 			out := builder.Assemble()
 			// debugPrintAsm(out)
 
@@ -843,10 +843,10 @@ func TestAMD64RHSConstOptimizedBinOp(t *testing.T) {
 			}
 
 			b := &AMD64Backend{}
-			regs := &dirtyRegs{}
-			b.emitPreamble(builder, regs)
-			b.emitRHSConstOptimizedInstruction(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.op}}, tc.constVal)
-			b.emitPostamble(builder, regs)
+			b.emitPreamble(builder)
+			b.emitRHSConstOptimizedInstruction(builder, currentInstruction{inst: InstructionMetadata{Op: tc.op}}, tc.constVal)
+			b.emitPostamble(builder)
+			b.lowerAMD64(builder)
 			out := builder.Assemble()
 			// debugPrintAsm(out)
 
@@ -943,23 +943,23 @@ func TestAMD64OperationsI64(t *testing.T) {
 	b := &AMD64Backend{}
 	for _, tc := range testCases {
 		t.Run(tc.Name, func(t *testing.T) {
-			regs := &dirtyRegs{}
 			builder, err := asm.NewBuilder("amd64", 64)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			b.emitPreamble(builder, regs)
+			b.emitPreamble(builder)
 			for _, arg := range tc.Args {
-				b.emitPushImmediate(builder, regs, currentInstruction{}, arg)
+				b.emitPushImmediate(builder, currentInstruction{}, arg)
 			}
 			switch tc.Op {
 			case ops.I64Shl, ops.I64ShrU, ops.I64ShrS:
-				b.emitShiftI64(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
+				b.emitShiftI64(builder, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
 			default:
-				b.emitBinaryI64(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
+				b.emitBinaryI64(builder, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
 			}
-			b.emitPostamble(builder, regs)
+			b.emitPostamble(builder)
+			b.lowerAMD64(builder)
 			out := builder.Assemble()
 
 			// debugPrintAsm(out)
@@ -1072,18 +1072,18 @@ func TestDivOps(t *testing.T) {
 	b := &AMD64Backend{}
 	for _, tc := range testCases {
 		t.Run(tc.Name, func(t *testing.T) {
-			regs := &dirtyRegs{}
 			builder, err := asm.NewBuilder("amd64", 64)
 			if err != nil {
 				t.Fatal(err)
 			}
-			b.emitPreamble(builder, regs)
+			b.emitPreamble(builder)
 
 			for _, arg := range tc.Args {
-				b.emitPushImmediate(builder, regs, currentInstruction{}, arg)
+				b.emitPushImmediate(builder, currentInstruction{}, arg)
 			}
-			b.emitDivide(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
-			b.emitPostamble(builder, regs)
+			b.emitDivide(builder, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
+			b.emitPostamble(builder)
+			b.lowerAMD64(builder)
 			out := builder.Assemble()
 
 			nativeBlock, err := allocator.AllocateExec(out)
@@ -1218,23 +1218,23 @@ func TestComparisonOps64(t *testing.T) {
 	b := &AMD64Backend{}
 	for _, tc := range testCases {
 		t.Run(tc.Name, func(t *testing.T) {
-			regs := &dirtyRegs{}
 			builder, err := asm.NewBuilder("amd64", 64)
 			if err != nil {
 				t.Fatal(err)
 			}
-			b.emitPreamble(builder, regs)
+			b.emitPreamble(builder)
 
 			for _, arg := range tc.Args {
-				b.emitPushImmediate(builder, regs, currentInstruction{}, arg)
+				b.emitPushImmediate(builder, currentInstruction{}, arg)
 			}
 			switch tc.Op {
 			case ops.I64Eqz:
-				b.emitUnaryComparison(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
+				b.emitUnaryComparison(builder, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
 			default:
-				b.emitComparison(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
+				b.emitComparison(builder, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
 			}
-			b.emitPostamble(builder, regs)
+			b.emitPostamble(builder)
+			b.lowerAMD64(builder)
 			out := builder.Assemble()
 			//debugPrintAsm(out)
 
@@ -1427,19 +1427,19 @@ func TestAMD64OperationsI32(t *testing.T) {
 	b := &AMD64Backend{}
 	for _, tc := range testCases {
 		t.Run(tc.Name, func(t *testing.T) {
-			regs := &dirtyRegs{}
 			builder, err := asm.NewBuilder("amd64", 64)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			b.emitPreamble(builder, regs)
+			b.emitPreamble(builder)
 			for _, arg := range tc.Args {
-				b.emitPushImmediate(builder, regs, currentInstruction{}, arg)
+				b.emitPushImmediate(builder, currentInstruction{}, arg)
 			}
 
-			b.emitBinaryI64(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
-			b.emitPostamble(builder, regs)
+			b.emitBinaryI64(builder, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
+			b.emitPostamble(builder)
+			b.lowerAMD64(builder)
 			out := builder.Assemble()
 			// debugPrintAsm(out)
 
@@ -1647,19 +1647,19 @@ func TestAMD64OperationsF64(t *testing.T) {
 	b := &AMD64Backend{}
 	for _, tc := range testCases {
 		t.Run(tc.Name, func(t *testing.T) {
-			regs := &dirtyRegs{}
 			builder, err := asm.NewBuilder("amd64", 64)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			b.emitPreamble(builder, regs)
+			b.emitPreamble(builder)
 			for _, arg := range tc.Args {
-				b.emitPushImmediate(builder, regs, currentInstruction{}, arg)
+				b.emitPushImmediate(builder, currentInstruction{}, arg)
 			}
 
-			b.emitBinaryFloat(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
-			b.emitPostamble(builder, regs)
+			b.emitBinaryFloat(builder, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
+			b.emitPostamble(builder)
+			b.lowerAMD64(builder)
 			out := builder.Assemble()
 			// debugPrintAsm(out)
 
@@ -1897,19 +1897,19 @@ func TestComparisonOpsFloat(t *testing.T) {
 	b := &AMD64Backend{}
 	for _, tc := range testCases {
 		t.Run(tc.Name, func(t *testing.T) {
-			regs := &dirtyRegs{}
 			builder, err := asm.NewBuilder("amd64", 64)
 			if err != nil {
 				t.Fatal(err)
 			}
-			b.emitPreamble(builder, regs)
+			b.emitPreamble(builder)
 
 			for _, arg := range tc.Args {
-				b.emitPushImmediate(builder, regs, currentInstruction{}, arg)
+				b.emitPushImmediate(builder, currentInstruction{}, arg)
 			}
 
-			b.emitComparisonFloat(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
-			b.emitPostamble(builder, regs)
+			b.emitComparisonFloat(builder, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
+			b.emitPostamble(builder)
+			b.lowerAMD64(builder)
 			out := builder.Assemble()
 			// debugPrintAsm(out)
 
@@ -1997,19 +1997,19 @@ func TestAMD64IntToFloat(t *testing.T) {
 	b := &AMD64Backend{}
 	for _, tc := range testCases {
 		t.Run(tc.Name, func(t *testing.T) {
-			regs := &dirtyRegs{}
 			builder, err := asm.NewBuilder("amd64", 64)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			b.emitPreamble(builder, regs)
+			b.emitPreamble(builder)
 			for _, arg := range tc.Args {
-				b.emitPushImmediate(builder, regs, currentInstruction{}, arg)
+				b.emitPushImmediate(builder, currentInstruction{}, arg)
 			}
 
-			b.emitConvertIntToFloat(builder, regs, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
-			b.emitPostamble(builder, regs)
+			b.emitConvertIntToFloat(builder, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
+			b.emitPostamble(builder)
+			b.lowerAMD64(builder)
 			out := builder.Assemble()
 			// debugPrintAsm(out)
 
