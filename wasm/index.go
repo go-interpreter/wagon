@@ -5,6 +5,7 @@
 package wasm
 
 import (
+	"bytes"
 	"fmt"
 	"reflect"
 )
@@ -38,14 +39,43 @@ func (m *Module) populateFunctions() error {
 		return nil
 	}
 
+	// If present, extract the function names from the custom 'name' section
+	var names NameMap
+	if s := m.Custom(CustomSectionName); s != nil {
+		var nSec NameSection
+		err := nSec.UnmarshalWASM(bytes.NewReader(s.Data))
+		if err != nil {
+			return err
+		}
+		if len(nSec.Types[NameFunction]) > 0 {
+			sub, err := nSec.Decode(NameFunction)
+			if err != nil {
+				return err
+			}
+			funcs, ok := sub.(*FunctionNames)
+			if ok {
+				names = funcs.Names
+			}
+		}
+	}
+
+	// If available, fill in the name field for the imported functions
+	for i := range m.FunctionIndexSpace {
+		m.FunctionIndexSpace[i].Name = names[uint32(i)]
+	}
+
+	// Add the functions from the wasm itself to the function list
+	numImports := len(m.FunctionIndexSpace)
 	for codeIndex, typeIndex := range m.Function.Types {
 		if int(typeIndex) >= len(m.Types.Entries) {
 			return InvalidFunctionIndexError(typeIndex)
 		}
 
+		// Create the main function structure
 		fn := Function{
 			Sig:  &m.Types.Entries[typeIndex],
 			Body: &m.Code.Bodies[codeIndex],
+			Name: names[uint32(codeIndex+numImports)], // Add the name string if we have it
 		}
 
 		m.FunctionIndexSpace = append(m.FunctionIndexSpace, fn)

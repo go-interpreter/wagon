@@ -24,6 +24,7 @@ type Function struct {
 	Sig  *FunctionSig
 	Body *FunctionBody
 	Host reflect.Value
+	Name string
 }
 
 // IsHost indicates whether this function is a host function as defined in:
@@ -159,7 +160,6 @@ func ReadModule(r io.Reader, resolvePath ResolveFunc) (*Module, error) {
 		if err := fn(); err != nil {
 			return nil, err
 		}
-
 	}
 
 	logger.Printf("There are %d entries in the function index space.", len(m.FunctionIndexSpace))
