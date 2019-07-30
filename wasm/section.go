@@ -633,7 +633,7 @@ func (s *SectionExports) WritePayload(w io.Writer) error {
 type DuplicateExportError string
 
 func (e DuplicateExportError) Error() string {
-	return fmt.Sprintf("Duplicate export entry: %s", e)
+	return fmt.Sprintf("Duplicate export entry: %s", string(e))
 }
 
 // ExportEntry represents an exported entry by the module

@@ -168,3 +168,8 @@ func TestModuleSignatureCheck(t *testing.T) {
 		})
 	}
 }
+
+func TestDuplicateExportError_NoStackOverflow(t *testing.T) {
+	err := wasm.DuplicateExportError("h")
+	_ = err.Error()
+}
