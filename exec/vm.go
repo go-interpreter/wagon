@@ -531,6 +531,11 @@ func (proc *Process) WriteAt(p []byte, off int64) (int, error) {
 	return length, err
 }
 
+// MemSize returns the current allocated memory size in bytes.
+func (proc *Process) MemSize() int {
+	return len(proc.vm.Memory())
+}
+
 // Terminate stops the execution of the current module.
 func (proc *Process) Terminate() {
 	proc.vm.abort = true
