@@ -126,7 +126,7 @@ func (m *Module) populateTables() error {
 	for _, elem := range m.Elements.Entries {
 		// the MVP dictates that index should always be zero, we should
 		// probably check this
-		if int(elem.Index) >= len(m.TableIndexSpace) {
+		if elem.Index >= uint32(len(m.TableIndexSpace)) {
 			return InvalidTableIndexError(elem.Index)
 		}
 
@@ -134,20 +134,21 @@ func (m *Module) populateTables() error {
 		if err != nil {
 			return err
 		}
-		offset, ok := val.(int32)
+		off, ok := val.(int32)
 		if !ok {
 			return InvalidValueTypeInitExprError{reflect.Int32, reflect.TypeOf(val).Kind()}
 		}
+		offset := uint32(off)
 
-		table := m.TableIndexSpace[int(elem.Index)]
-		if int(offset)+len(elem.Elems) > len(table) {
-			data := make([]uint32, int(offset)+len(elem.Elems))
+		table := m.TableIndexSpace[elem.Index]
+		//use uint64 to avoid overflow
+		if uint64(offset)+uint64(len(elem.Elems)) > uint64(len(table)) {
+			data := make([]uint32, uint64(offset)+uint64(len(elem.Elems)))
 			copy(data[offset:], elem.Elems)
 			copy(data, table)
-			m.TableIndexSpace[int(elem.Index)] = data
+			m.TableIndexSpace[elem.Index] = data
 		} else {
-			copy(table[int(offset):], elem.Elems)
-			m.TableIndexSpace[int(elem.Index)] = table
+			copy(table[offset:], elem.Elems)
 		}
 	}
 
@@ -180,20 +181,20 @@ func (m *Module) populateLinearMemory() error {
 		if err != nil {
 			return err
 		}
-		offset, ok := val.(int32)
+		off, ok := val.(int32)
 		if !ok {
 			return InvalidValueTypeInitExprError{reflect.Int32, reflect.TypeOf(val).Kind()}
 		}
+		offset := uint32(off)
 
-		memory := m.LinearMemoryIndexSpace[int(entry.Index)]
-		if int(offset)+len(entry.Data) > len(memory) {
-			data := make([]byte, int(offset)+len(entry.Data))
+		memory := m.LinearMemoryIndexSpace[entry.Index]
+		if uint64(offset)+uint64(len(entry.Data)) > uint64(len(memory)) {
+			data := make([]byte, uint64(offset)+uint64(len(entry.Data)))
 			copy(data, memory)
 			copy(data[offset:], entry.Data)
 			m.LinearMemoryIndexSpace[int(entry.Index)] = data
 		} else {
-			copy(memory[int(offset):], entry.Data)
-			m.LinearMemoryIndexSpace[int(entry.Index)] = memory
+			copy(memory[offset:], entry.Data)
 		}
 	}
 
