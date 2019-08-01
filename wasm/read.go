@@ -5,20 +5,34 @@
 package wasm
 
 import (
+	"bytes"
 	"encoding/binary"
 	"io"
 
 	"github.com/go-interpreter/wagon/wasm/leb128"
 )
 
-func readBytes(r io.Reader, n int) ([]byte, error) {
-	bytes := make([]byte, n)
-	_, err := io.ReadFull(r, bytes)
-	if err != nil {
-		return bytes, err
-	}
+// to avoid memory attack
+const maxInitialCap = 10 * 1024
 
-	return bytes, nil
+func getInitialCap(count uint32) uint32 {
+	if count > maxInitialCap {
+		return maxInitialCap
+	}
+	return count
+}
+
+func readBytes(r io.Reader, n int) ([]byte, error) {
+	if n == 0 {
+		return nil, nil
+	}
+	limited := io.LimitReader(r, int64(n))
+	buf := &bytes.Buffer{}
+	num, _ := buf.ReadFrom(limited)
+	if num == int64(n) {
+		return buf.Bytes(), nil
+	}
+	return nil, io.ErrUnexpectedEOF
 }
 
 func readBytesUint(r io.Reader) ([]byte, error) {

@@ -134,13 +134,14 @@ func (f *FunctionSig) UnmarshalWASM(r io.Reader) error {
 	if err != nil {
 		return err
 	}
-	f.ParamTypes = make([]ValueType, paramCount)
+	f.ParamTypes = make([]ValueType, 0, getInitialCap(paramCount))
 
-	for i := range f.ParamTypes {
-		err = f.ParamTypes[i].UnmarshalWASM(r)
-		if err != nil {
+	for i := uint32(0); i < paramCount; i++ {
+		var v ValueType
+		if err = v.UnmarshalWASM(r); err != nil {
 			return err
 		}
+		f.ParamTypes = append(f.ParamTypes, v)
 	}
 
 	returnCount, err := leb128.ReadVarUint32(r)
@@ -148,12 +149,13 @@ func (f *FunctionSig) UnmarshalWASM(r io.Reader) error {
 		return err
 	}
 
-	f.ReturnTypes = make([]ValueType, returnCount)
-	for i := range f.ReturnTypes {
-		err = f.ReturnTypes[i].UnmarshalWASM(r)
-		if err != nil {
+	f.ReturnTypes = make([]ValueType, 0, getInitialCap(returnCount))
+	for i := uint32(0); i < returnCount; i++ {
+		var v ValueType
+		if err = v.UnmarshalWASM(r); err != nil {
 			return err
 		}
+		f.ReturnTypes = append(f.ReturnTypes, v)
 	}
 
 	return nil
