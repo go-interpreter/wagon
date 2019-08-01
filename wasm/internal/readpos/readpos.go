@@ -25,6 +25,7 @@ func (r *ReadPos) Read(p []byte) (int, error) {
 // ReadByte implements the io.ByteReader interface
 func (r *ReadPos) ReadByte() (byte, error) {
 	p := make([]byte, 1)
-	_, err := r.R.Read(p)
+	n, err := r.R.Read(p)
+	r.CurPos += int64(n)
 	return p[0], err
 }

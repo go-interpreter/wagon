@@ -6,6 +6,7 @@ package wasm
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"reflect"
 
@@ -116,15 +117,16 @@ func DecodeModule(r io.Reader) (*Module, error) {
 	if m.Version, err = readU32(reader); err != nil {
 		return nil, err
 	}
-
-	for {
-		done, err := m.readSection(reader)
-		if err != nil {
-			return nil, err
-		} else if done {
-			return m, nil
-		}
+	if m.Version != Version {
+		return nil, fmt.Errorf("wasm: unknown binary version: %d", m.Version)
 	}
+
+	err = newSectionsReader(m).readSections(reader)
+	if err != nil {
+		return nil, err
+	}
+
+	return m, nil
 }
 
 // ReadModule reads a module from the reader r. resolvePath must take a string

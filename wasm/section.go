@@ -105,19 +105,46 @@ func (e MissingSectionError) Error() string {
 	return fmt.Sprintf("wasm: missing section %s", SectionID(e).String())
 }
 
+type sectionsReader struct {
+	lastSecOrder uint8 // previous non-custom sectionid
+	m            *Module
+}
+
+func newSectionsReader(m *Module) *sectionsReader {
+	return &sectionsReader{m: m}
+}
+
+func (s *sectionsReader) readSections(r *readpos.ReadPos) error {
+	for {
+		done, err := s.readSection(r)
+		switch {
+		case err != nil:
+			return err
+		case done:
+			return nil
+		}
+	}
+}
+
 // reads a valid section from r. The first return value is true if and only if
 // the module has been completely read.
-func (m *Module) readSection(r *readpos.ReadPos) (bool, error) {
-	var err error
-	var id uint32
+func (sr *sectionsReader) readSection(r *readpos.ReadPos) (bool, error) {
+	m := sr.m
 
 	logger.Println("Reading section ID")
-	id, err = leb128.ReadVarUint32(r)
+	id, err := r.ReadByte()
 	if err == io.EOF {
 		return true, nil
 	} else if err != nil {
 		return false, err
 	}
+	if id != uint8(SectionIDCustom) {
+		if id <= sr.lastSecOrder {
+			return false, fmt.Errorf("wasm: sections must occur at most once and in the prescribed order")
+		}
+		sr.lastSecOrder = id
+	}
+
 	s := RawSection{ID: SectionID(id)}
 
 	logger.Println("Reading payload length")
@@ -204,7 +231,7 @@ func (m *Module) readSection(r *readpos.ReadPos) (bool, error) {
 			return false, MissingSectionError(SectionIDFunction)
 		}
 		if len(m.Function.Types) != len(s.Bodies) {
-			return false, errors.New("The number of entries in the function and code section are unequal")
+			return false, errors.New("wasm: the number of entries in the function and code section are unequal")
 		}
 		if m.Types == nil {
 			return false, MissingSectionError(SectionIDType)
