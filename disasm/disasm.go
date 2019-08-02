@@ -222,7 +222,7 @@ func NewDisassembly(fn wasm.Function, module *wasm.Module) (*Disassembly, error)
 			}
 
 		case ops.Block, ops.Loop, ops.If:
-			sig := uint32(instr.Immediates[0].(wasm.BlockType))
+			sig := instr.Immediates[0].(wasm.BlockType)
 			logger.Printf("if, depth is %d", stackDepths.Top())
 			stackDepths.Push(stackDepths.Top())
 			// If this new block is unreachable, its
@@ -237,7 +237,7 @@ func NewDisassembly(fn wasm.Function, module *wasm.Module) (*Disassembly, error)
 			}
 			instr.Block = &BlockInfo{
 				Start:     true,
-				Signature: wasm.BlockType(sig),
+				Signature: sig,
 			}
 
 			blockIndices.Push(uint64(curIndex))
@@ -391,7 +391,7 @@ func Disassemble(code []byte) ([]Instr, error) {
 
 		switch op {
 		case ops.Block, ops.Loop, ops.If:
-			sig, err := leb128.ReadVarint32(reader)
+			sig, err := wasm.ReadByte(reader)
 			if err != nil {
 				return nil, err
 			}

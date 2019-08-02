@@ -67,7 +67,7 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 
 		switch op {
 		case ops.If, ops.Block, ops.Loop:
-			sig, err := vm.fetchVarInt()
+			sig, err := vm.fetchByte()
 			if err != nil {
 				return vm, err
 			}

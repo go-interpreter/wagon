@@ -21,7 +21,7 @@ func Assemble(instr []Instr) ([]byte, error) {
 		body.WriteByte(ins.Op.Code)
 		switch op := ins.Op.Code; op {
 		case ops.Block, ops.Loop, ops.If:
-			leb128.WriteVarint64(body, int64(ins.Immediates[0].(wasm.BlockType)))
+			body.WriteByte(byte(ins.Immediates[0].(wasm.BlockType)))
 		case ops.Br, ops.BrIf:
 			leb128.WriteVarUint32(body, ins.Immediates[0].(uint32))
 		case ops.BrTable:

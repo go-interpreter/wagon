@@ -35,6 +35,17 @@ func readBytes(r io.Reader, n int) ([]byte, error) {
 	return nil, io.ErrUnexpectedEOF
 }
 
+func writeByte(w io.Writer, b byte) error {
+	_, err := w.Write([]byte{b})
+	return err
+}
+
+func ReadByte(r io.Reader) (byte, error) {
+	p := make([]byte, 1)
+	_, err := r.Read(p)
+	return p[0], err
+}
+
 func readBytesUint(r io.Reader) ([]byte, error) {
 	n, err := leb128.ReadVarUint32(r)
 	if err != nil {

@@ -49,6 +49,10 @@ func (vm *mockVM) fetchVarInt() (int32, error) {
 	return leb128.ReadVarint32(vm.code)
 }
 
+func (vm *mockVM) fetchByte() (byte, error) {
+	return vm.code.ReadByte()
+}
+
 func (vm *mockVM) fetchVarInt64() (int64, error) {
 	return leb128.ReadVarint64(vm.code)
 }
