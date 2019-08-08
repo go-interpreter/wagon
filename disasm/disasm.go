@@ -428,11 +428,14 @@ func Disassemble(code []byte) ([]Instr, error) {
 			}
 			instr.Immediates = append(instr.Immediates, index)
 			if op == ops.CallIndirect {
-				reserved, err := leb128.ReadVarUint32(reader)
+				idx, err := wasm.ReadByte(reader)
 				if err != nil {
 					return nil, err
 				}
-				instr.Immediates = append(instr.Immediates, reserved)
+				if idx != 0x00 {
+					return nil, errors.New("disasm: table index in call_indirect must be 0")
+				}
+				instr.Immediates = append(instr.Immediates, uint32(idx))
 			}
 		case ops.GetLocal, ops.SetLocal, ops.TeeLocal, ops.GetGlobal, ops.SetGlobal:
 			index, err := leb128.ReadVarUint32(reader)
@@ -468,11 +471,11 @@ func Disassemble(code []byte) ([]Instr, error) {
 			instr.Immediates = append(instr.Immediates, math.Float64frombits(i))
 		case ops.I32Load, ops.I64Load, ops.F32Load, ops.F64Load, ops.I32Load8s, ops.I32Load8u, ops.I32Load16s, ops.I32Load16u, ops.I64Load8s, ops.I64Load8u, ops.I64Load16s, ops.I64Load16u, ops.I64Load32s, ops.I64Load32u, ops.I32Store, ops.I64Store, ops.F32Store, ops.F64Store, ops.I32Store8, ops.I32Store16, ops.I64Store8, ops.I64Store16, ops.I64Store32:
 			// read memory_immediate
-			flags, err := leb128.ReadVarUint32(reader)
+			align, err := leb128.ReadVarUint32(reader)
 			if err != nil {
 				return nil, err
 			}
-			instr.Immediates = append(instr.Immediates, flags)
+			instr.Immediates = append(instr.Immediates, align)
 
 			offset, err := leb128.ReadVarUint32(reader)
 			if err != nil {
@@ -480,11 +483,14 @@ func Disassemble(code []byte) ([]Instr, error) {
 			}
 			instr.Immediates = append(instr.Immediates, offset)
 		case ops.CurrentMemory, ops.GrowMemory:
-			res, err := leb128.ReadVarUint32(reader)
+			idx, err := wasm.ReadByte(reader)
 			if err != nil {
 				return nil, err
 			}
-			instr.Immediates = append(instr.Immediates, uint8(res))
+			if idx != 0x00 {
+				return nil, errors.New("disasm: memory index must be 0")
+			}
+			instr.Immediates = append(instr.Immediates, uint8(idx))
 		}
 		out = append(out, instr)
 	}
