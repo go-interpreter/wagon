@@ -175,7 +175,7 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 			vm.setPolymorphic()
 
 		case ops.I32Const:
-			_, err := vm.fetchVarUint()
+			_, err := vm.fetchVarInt()
 			if err != nil {
 				return vm, err
 			}
