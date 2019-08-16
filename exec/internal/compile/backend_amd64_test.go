@@ -21,7 +21,7 @@ import (
 )
 
 func TestAMD64JitCall(t *testing.T) {
-	if runtime.GOOS != "linux" {
+	if !supportedOS(runtime.GOOS) {
 		t.SkipNow()
 	}
 	allocator := &MMapAllocator{}
@@ -51,7 +51,7 @@ func TestAMD64JitCall(t *testing.T) {
 }
 
 func TestAMD64StackPush(t *testing.T) {
-	if runtime.GOOS != "linux" {
+	if !supportedOS(runtime.GOOS) {
 		t.SkipNow()
 	}
 	allocator := &MMapAllocator{}
@@ -113,7 +113,7 @@ func TestAMD64StackPush(t *testing.T) {
 }
 
 func TestAMD64StackPop(t *testing.T) {
-	if runtime.GOOS != "linux" {
+	if !supportedOS(runtime.GOOS) {
 		t.SkipNow()
 	}
 	allocator := &MMapAllocator{}
@@ -153,7 +153,7 @@ func TestAMD64StackPop(t *testing.T) {
 }
 
 func TestAMD64ExitSignal(t *testing.T) {
-	if runtime.GOOS != "linux" {
+	if !supportedOS(runtime.GOOS) {
 		t.SkipNow()
 	}
 	allocator := &MMapAllocator{}
@@ -236,7 +236,7 @@ func TestAMD64ExitSignal(t *testing.T) {
 }
 
 func TestAMD64LocalsGet(t *testing.T) {
-	if runtime.GOOS != "linux" {
+	if !supportedOS(runtime.GOOS) {
 		t.SkipNow()
 	}
 	allocator := &MMapAllocator{}
@@ -277,7 +277,7 @@ func TestAMD64LocalsGet(t *testing.T) {
 }
 
 func TestAMD64LocalsSet(t *testing.T) {
-	if runtime.GOOS != "linux" {
+	if !supportedOS(runtime.GOOS) {
 		t.SkipNow()
 	}
 	allocator := &MMapAllocator{}
@@ -322,7 +322,7 @@ func TestAMD64LocalsSet(t *testing.T) {
 }
 
 func TestAMD64GlobalsGet(t *testing.T) {
-	if runtime.GOOS != "linux" {
+	if !supportedOS(runtime.GOOS) {
 		t.SkipNow()
 	}
 	allocator := &MMapAllocator{}
@@ -359,7 +359,7 @@ func TestAMD64GlobalsGet(t *testing.T) {
 }
 
 func TestAMD64GlobalsSet(t *testing.T) {
-	if runtime.GOOS != "linux" {
+	if !supportedOS(runtime.GOOS) {
 		t.SkipNow()
 	}
 	allocator := &MMapAllocator{}
@@ -407,7 +407,7 @@ func TestAMD64GlobalsSet(t *testing.T) {
 }
 
 func TestAMD64Select(t *testing.T) {
-	if runtime.GOOS != "linux" {
+	if !supportedOS(runtime.GOOS) {
 		t.SkipNow()
 	}
 	allocator := &MMapAllocator{}
@@ -482,7 +482,7 @@ func TestAMD64MemoryLoad(t *testing.T) {
 			oob:   true,
 		},
 	}
-	if runtime.GOOS != "linux" {
+	if !supportedOS(runtime.GOOS) {
 		t.SkipNow()
 	}
 	allocator := &MMapAllocator{}
@@ -568,7 +568,7 @@ func TestAMD64MemoryStore(t *testing.T) {
 			oob:   true,
 		},
 	}
-	if runtime.GOOS != "linux" {
+	if !supportedOS(runtime.GOOS) {
 		t.SkipNow()
 	}
 	allocator := &MMapAllocator{}
@@ -688,7 +688,7 @@ func TestAMD64FusedConstStore(t *testing.T) {
 			expectMem:    []byte{0, 0, 0, 0, 0, 5, 0, 0, 0, 0},
 		},
 	}
-	if runtime.GOOS != "linux" {
+	if !supportedOS(runtime.GOOS) {
 		t.SkipNow()
 	}
 	allocator := &MMapAllocator{}
@@ -829,7 +829,7 @@ func TestAMD64RHSConstOptimizedBinOp(t *testing.T) {
 			expectStack: []uint64{1},
 		},
 	}
-	if runtime.GOOS != "linux" {
+	if !supportedOS(runtime.GOOS) {
 		t.SkipNow()
 	}
 	allocator := &MMapAllocator{}
@@ -867,7 +867,7 @@ func TestAMD64RHSConstOptimizedBinOp(t *testing.T) {
 }
 
 func TestAMD64OperationsI64(t *testing.T) {
-	if runtime.GOOS != "linux" {
+	if !supportedOS(runtime.GOOS) {
 		t.SkipNow()
 	}
 	testCases := []struct {
@@ -984,7 +984,7 @@ func TestAMD64OperationsI64(t *testing.T) {
 }
 
 func TestDivOps(t *testing.T) {
-	if runtime.GOOS != "linux" {
+	if !supportedOS(runtime.GOOS) {
 		t.SkipNow()
 	}
 	testCases := []struct {
@@ -1106,7 +1106,7 @@ func TestDivOps(t *testing.T) {
 }
 
 func TestComparisonOps64(t *testing.T) {
-	if runtime.GOOS != "linux" {
+	if !supportedOS(runtime.GOOS) {
 		t.SkipNow()
 	}
 	testCases := []struct {
@@ -1258,7 +1258,7 @@ func TestComparisonOps64(t *testing.T) {
 }
 
 func TestAMD64RHSOptimizations(t *testing.T) {
-	if runtime.GOOS != "linux" {
+	if !supportedOS(runtime.GOOS) {
 		t.SkipNow()
 	}
 	tcs := []struct {
@@ -1357,7 +1357,7 @@ func TestAMD64RHSOptimizations(t *testing.T) {
 }
 
 func TestAMD64OperationsI32(t *testing.T) {
-	if runtime.GOOS != "linux" {
+	if !supportedOS(runtime.GOOS) {
 		t.SkipNow()
 	}
 	testCases := []struct {
@@ -1463,7 +1463,7 @@ func TestAMD64OperationsI32(t *testing.T) {
 }
 
 func TestAMD64OperationsF64(t *testing.T) {
-	if runtime.GOOS != "linux" {
+	if !supportedOS(runtime.GOOS) {
 		t.SkipNow()
 	}
 	testCases := []struct {
@@ -1683,7 +1683,7 @@ func TestAMD64OperationsF64(t *testing.T) {
 }
 
 func TestComparisonOpsFloat(t *testing.T) {
-	if runtime.GOOS != "linux" {
+	if !supportedOS(runtime.GOOS) {
 		t.SkipNow()
 	}
 	testCases := []struct {
@@ -1933,7 +1933,7 @@ func TestComparisonOpsFloat(t *testing.T) {
 }
 
 func TestAMD64IntToFloat(t *testing.T) {
-	if runtime.GOOS != "linux" {
+	if !supportedOS(runtime.GOOS) {
 		t.SkipNow()
 	}
 	testCases := []struct {
@@ -2062,4 +2062,11 @@ func u64Const(i uint64) uint64 {
 func u32ConstNegated(i uint32) uint64 {
 	tmp := -i
 	return uint64(tmp)
+}
+
+func supportedOS(os string) bool {
+	if os == "linux" || os == "windows" || os == "darwin" {
+		return true
+	}
+	return false
 }

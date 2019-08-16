@@ -17,6 +17,14 @@ func init() {
 		Arch: "amd64",
 		OS:   "linux",
 		make: makeAMD64NativeBackend,
+	}, nativeArch{
+		Arch: "amd64",
+		OS:   "windows",
+		make: makeAMD64NativeBackend,
+	}, nativeArch{
+		Arch: "amd64",
+		OS:   "darwin",
+		make: makeAMD64NativeBackend,
 	})
 }
 

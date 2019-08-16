@@ -389,7 +389,7 @@ func testModules(t *testing.T, dir string, repeat bool) {
 		})
 		t.Run(fileName+" native", func(t *testing.T) {
 			t.Parallel()
-			if runtime.GOARCH != "amd64" || runtime.GOOS != "linux" {
+			if runtime.GOARCH != "amd64" || !supportedOS(runtime.GOOS) {
 				t.SkipNow()
 			}
 
@@ -542,4 +542,11 @@ func BenchmarkU64Arithmetic50Native(b *testing.B) {
 	for n := 0; n < b.N; n++ {
 		benchmarkDummy, _ = vm.ExecCode(int64(funcIndex), 50, 1234)
 	}
+}
+
+func supportedOS(os string) bool {
+	if os == "linux" || os == "windows" || os == "darwin" {
+		return true
+	}
+	return false
 }
