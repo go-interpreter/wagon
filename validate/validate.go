@@ -17,15 +17,15 @@ import (
 // vibhavp: TODO: We do not verify whether blocks don't access for the parent block, do that.
 func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Module) (*mockVM, error) {
 	vm := &mockVM{
-		stack:    []operand{},
-		stackTop: 0,
-
+		stack:      make([]operand, 0, 6),
 		code:       bytes.NewReader(body.Code),
 		origLength: len(body.Code),
 
-		polymorphic: false,
-		blocks:      []block{},
-		curFunc:     fn,
+		ctrlFrames: []frame{
+			// The outermost frame is the function itself.
+			{endTypes: fn.ReturnTypes},
+		},
+		curFunc: fn,
 	}
 
 	localVariables := []operand{}
@@ -58,7 +58,7 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 			return vm, err
 		}
 
-		logger.Printf("PC: %d OP: %s polymorphic: %v", vm.pc(), opStruct.Name, vm.isPolymorphic())
+		logger.Printf("PC: %d OP: %s unreachable: %v", vm.pc(), opStruct.Name, vm.topFrameUnreachable())
 
 		if !opStruct.Polymorphic {
 			if err := vm.adjustStack(opStruct); err != nil {
@@ -67,97 +67,166 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 		}
 
 		switch op {
-		case ops.If, ops.Block, ops.Loop:
+
+		case ops.Block, ops.If: // If operand is handled in adjustStack()
 			sig, err := vm.fetchByte()
 			if err != nil {
 				return vm, err
 			}
 
-			switch wasm.ValueType(sig) {
-			case wasm.ValueTypeI32, wasm.ValueTypeI64, wasm.ValueTypeF32, wasm.ValueTypeF64, wasm.ValueType(wasm.BlockTypeEmpty):
-				vm.pushBlock(op, wasm.BlockType(sig))
+			switch retVal := wasm.ValueType(sig); retVal {
+			case wasm.ValueType(wasm.BlockTypeEmpty):
+				vm.pushFrame(op, nil, nil)
+			case wasm.ValueTypeI32, wasm.ValueTypeI64, wasm.ValueTypeF32, wasm.ValueTypeF64:
+				vm.pushFrame(op, []wasm.ValueType{retVal}, []wasm.ValueType{retVal})
 			default:
-				if !vm.isPolymorphic() {
-					return vm, InvalidImmediateError{"block_type", opStruct.Name}
-				}
+				return vm, InvalidImmediateError{"block_type", opStruct.Name}
+			}
+
+		case ops.Loop:
+			sig, err := vm.fetchByte()
+			if err != nil {
+				return vm, err
+			}
+
+			switch retVal := wasm.ValueType(sig); retVal {
+			case wasm.ValueType(wasm.BlockTypeEmpty):
+				vm.pushFrame(op, nil, nil)
+			case wasm.ValueTypeI32, wasm.ValueTypeI64, wasm.ValueTypeF32, wasm.ValueTypeF64:
+				vm.pushFrame(op, nil, []wasm.ValueType{retVal})
+			default:
+				return vm, InvalidImmediateError{"block_type", opStruct.Name}
 			}
 
 		case ops.Else:
-			block := vm.topBlock()
-			if block == nil || block.op != ops.If {
+			frame, err := vm.popFrame()
+			if err != nil {
+				return vm, err
+			}
+			if frame == nil || frame.op != ops.If {
 				return vm, UnmatchedOpError(op)
 			}
+			vm.pushFrame(op, frame.endTypes, frame.endTypes)
 
-			if block.blockType != wasm.BlockTypeEmpty {
-				top, under := vm.topOperand()
-				if !vm.isPolymorphic() && (under || top.Type != wasm.ValueType(block.blockType)) {
-					return vm, InvalidTypeError{wasm.ValueType(block.blockType), top.Type}
-				}
-				vm.pushOperand(wasm.ValueType(block.blockType))
-			}
-			vm.stackTop = block.stackTop
 		case ops.End:
-			isPolymorphic := vm.isPolymorphic()
-
-			block := vm.popBlock()
-			if block == nil {
+			frame, err := vm.popFrame()
+			if err != nil {
+				return vm, err
+			}
+			if frame == nil {
 				return vm, UnmatchedOpError(op)
 			}
-
-			if block.blockType != wasm.BlockTypeEmpty {
-				top, under := vm.topOperand()
-				if !isPolymorphic && (under || top.Type != wasm.ValueType(block.blockType)) {
-					return vm, InvalidTypeError{wasm.ValueType(block.blockType), top.Type}
+			for _, ret := range frame.endTypes {
+				if ret != noReturn {
+					vm.pushOperand(ret)
 				}
-				vm.stackTop = block.stackTop
-				vm.pushOperand(wasm.ValueType(block.blockType))
-				vm.stackTop = block.stackTop + 1 // as we pushed an element
-			} else {
-				vm.stackTop = block.stackTop
 			}
 
-		case ops.BrIf, ops.Br:
+		case ops.Br:
 			depth, err := vm.fetchVarUint()
 			if err != nil {
 				return vm, err
 			}
-			if err = vm.canBranch(int(depth)); !vm.isPolymorphic() && err != nil {
+			if int(depth) >= len(vm.ctrlFrames) {
+				return vm, InvalidLabelError(depth)
+			}
+			frame := vm.ctrlFrames[len(vm.ctrlFrames)-1-int(depth)]
+			logger.Printf("Branch is targeting frame: %+v which is depth %d", frame, depth)
+			for i := len(frame.labelTypes) - 1; i >= 0; i-- {
+				t := frame.labelTypes[i]
+				op, err := vm.popOperand()
+				if err != nil {
+					return vm, err
+				}
+				if !op.Equal(t) {
+					return vm, InvalidTypeError{t, op.Type}
+				}
+			}
+			vm.setUnreachable()
+
+		case ops.BrIf:
+			depth, err := vm.fetchVarUint()
+			if err != nil {
 				return vm, err
 			}
-			if op == ops.Br {
-				vm.setPolymorphic()
+			if int(depth) >= len(vm.ctrlFrames) {
+				return vm, InvalidLabelError(depth)
 			}
+			frame := vm.ctrlFrames[len(vm.ctrlFrames)-1-int(depth)]
+			for i := len(frame.labelTypes) - 1; i >= 0; i-- {
+				t := frame.labelTypes[i]
+				op, err := vm.popOperand()
+				if err != nil {
+					return vm, err
+				}
+				if !op.Equal(t) {
+					return vm, InvalidTypeError{t, op.Type}
+				}
+			}
+			for _, t := range frame.labelTypes {
+				vm.pushOperand(t)
+			}
+
 		case ops.BrTable:
-			operand, under := vm.popOperand()
-			if !vm.isPolymorphic() && (under || operand.Type != wasm.ValueTypeI32) {
-				return vm, InvalidTypeError{wasm.ValueTypeI32, operand.Type}
+			// Read & typecheck branching operand from stack.
+			op, err := vm.popOperand()
+			if err != nil {
+				return vm, err
 			}
-			// read table entries
+			if !op.Equal(wasm.ValueTypeI32) {
+				return vm, InvalidTypeError{wasm.ValueTypeI32, op.Type}
+			}
+
+			// Read each branch table item, and validate they refer to an existant
+			// frame.
 			targetCount, err := vm.fetchVarUint()
 			if err != nil {
 				return vm, err
 			}
-
-			var targetTable []uint32
+			targets := make([]uint32, int(targetCount))
 			for i := uint32(0); i < targetCount; i++ {
-				entry, err := vm.fetchVarUint()
+				targetDepth, err := vm.fetchVarUint()
 				if err != nil {
 					return vm, err
 				}
-				if err = vm.canBranch(int(entry)); !vm.isPolymorphic() && err != nil {
-					return vm, err
+				if int(targetDepth) >= len(vm.ctrlFrames) {
+					return vm, InvalidLabelError(targetDepth)
 				}
-				targetTable = append(targetTable, entry)
+				targets[i] = targetDepth
 			}
 
+			// Read the default branch target, and validate it refers to an existant
+			// frame.
 			defaultTarget, err := vm.fetchVarUint()
 			if err != nil {
 				return vm, err
 			}
-			if err = vm.canBranch(int(defaultTarget)); !vm.isPolymorphic() && err != nil {
-				return vm, err
+			if int(defaultTarget) >= len(vm.ctrlFrames) {
+				return vm, InvalidLabelError(defaultTarget)
 			}
-			vm.setPolymorphic()
+
+			// Validate the type signature of each branch matches that of
+			// the default branch.
+			defaultBranch := vm.getFrameFromDepth(int(defaultTarget))
+			for _, target := range targets {
+				frame := vm.getFrameFromDepth(int(target))
+				if err := defaultBranch.matchingLabelTypes(frame); err != nil {
+					return vm, err
+				}
+			}
+
+			// Pop operands based on the type signature of the default branch.
+			for i := len(defaultBranch.labelTypes) - 1; i >= 0; i-- {
+				t := defaultBranch.labelTypes[i]
+				op, err := vm.popOperand()
+				if err != nil {
+					return vm, err
+				}
+				if !op.Equal(t) {
+					return vm, InvalidTypeError{t, op.Type}
+				}
+			}
+			vm.setUnreachable()
 
 		case ops.Return:
 			if len(fn.ReturnTypes) > 1 {
@@ -165,36 +234,43 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 			}
 			if len(fn.ReturnTypes) != 0 {
 				// only single returns supported for now
-				top, under := vm.popOperand()
-				if !vm.isPolymorphic() && (under || top.Type != fn.ReturnTypes[0]) {
-					return vm, InvalidTypeError{fn.ReturnTypes[0], top.Type}
+				op, err := vm.popOperand()
+				if err != nil {
+					return vm, err
+				}
+				if !op.Equal(fn.ReturnTypes[0]) {
+					return vm, InvalidTypeError{fn.ReturnTypes[0], op.Type}
 				}
 			}
-			vm.setPolymorphic()
+			vm.setUnreachable()
 
 		case ops.Unreachable:
-			vm.setPolymorphic()
+			vm.setUnreachable()
 
 		case ops.I32Const:
 			_, err := vm.fetchVarInt()
 			if err != nil {
 				return vm, err
 			}
+
 		case ops.I64Const:
 			_, err := vm.fetchVarInt64()
 			if err != nil {
 				return vm, err
 			}
+
 		case ops.F32Const:
 			_, err := vm.fetchUint32()
 			if err != nil {
 				return vm, err
 			}
+
 		case ops.F64Const:
 			_, err := vm.fetchUint64()
 			if err != nil {
 				return vm, err
 			}
+
 		case ops.GetLocal, ops.SetLocal, ops.TeeLocal:
 			i, err := vm.fetchVarUint()
 			if err != nil {
@@ -209,9 +285,12 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 			if op == ops.GetLocal {
 				vm.pushOperand(v.Type)
 			} else { // == set_local or tee_local
-				top, under := vm.popOperand()
-				if !vm.isPolymorphic() && (under || top.Type != v.Type) {
-					return vm, InvalidTypeError{v.Type, top.Type}
+				operand, err := vm.popOperand()
+				if err != nil {
+					return vm, err
+				}
+				if !operand.Equal(v.Type) {
+					return vm, InvalidTypeError{v.Type, operand.Type}
 				}
 				if op == ops.TeeLocal {
 					vm.pushOperand(v.Type)
@@ -231,9 +310,12 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 			if op == ops.GetGlobal {
 				vm.pushOperand(gv.Type.Type)
 			} else {
-				val, under := vm.popOperand()
-				if !vm.isPolymorphic() && (under || val.Type != gv.Type.Type) {
-					return vm, InvalidTypeError{gv.Type.Type, val.Type}
+				op, err := vm.popOperand()
+				if err != nil {
+					return vm, err
+				}
+				if !op.Equal(gv.Type.Type) {
+					return vm, InvalidTypeError{gv.Type.Type, op.Type}
 				}
 			}
 
@@ -249,6 +331,7 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 			if err != nil {
 				return vm, err
 			}
+
 		case ops.CurrentMemory, ops.GrowMemory:
 			memIndex, err := vm.fetchByte()
 			if err != nil {
@@ -272,14 +355,17 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 			logger.Printf("Function being called: %v", fn)
 			for index := range fn.Sig.ParamTypes {
 				argType := fn.Sig.ParamTypes[len(fn.Sig.ParamTypes)-index-1]
-				operand, under := vm.popOperand()
-				if !vm.isPolymorphic() && (under || operand.Type != argType) {
-					return vm, InvalidTypeError{argType, operand.Type}
+				op, err := vm.popOperand()
+				if err != nil {
+					return vm, err
+				}
+				if !op.Equal(argType) {
+					return vm, InvalidTypeError{argType, op.Type}
 				}
 			}
 
-			if len(fn.Sig.ReturnTypes) > 0 {
-				vm.pushOperand(fn.Sig.ReturnTypes[0])
+			for _, t := range fn.Sig.ReturnTypes {
+				vm.pushOperand(t)
 			}
 
 		case ops.CallIndirect:
@@ -316,47 +402,53 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 
 			fnExpectSig := module.Types.Entries[index]
 
-			if operand, under := vm.popOperand(); !vm.isPolymorphic() && (under || operand.Type != wasm.ValueTypeI32) {
-				return vm, InvalidTypeError{wasm.ValueTypeI32, operand.Type}
+			op, err := vm.popOperand()
+			if err != nil {
+				return vm, err
+			}
+			if !op.Equal(wasm.ValueTypeI32) {
+				return vm, InvalidTypeError{wasm.ValueTypeI32, op.Type}
 			}
 
 			for index := range fnExpectSig.ParamTypes {
 				argType := fnExpectSig.ParamTypes[len(fnExpectSig.ParamTypes)-index-1]
-				operand, under := vm.popOperand()
-				if !vm.isPolymorphic() && (under || (operand.Type != argType)) {
-					return vm, InvalidTypeError{argType, operand.Type}
+				op, err := vm.popOperand()
+				if err != nil {
+					return vm, err
+				}
+				if !op.Equal(argType) {
+					return vm, InvalidTypeError{argType, op.Type}
 				}
 			}
-
-			if len(fnExpectSig.ReturnTypes) > 0 {
-				vm.pushOperand(fnExpectSig.ReturnTypes[0])
+			for _, t := range fnExpectSig.ReturnTypes {
+				vm.pushOperand(t)
 			}
 
 		case ops.Drop:
-			if _, under := vm.popOperand(); !vm.isPolymorphic() && under {
-				return vm, ErrStackUnderflow
+			if _, err := vm.popOperand(); err != nil {
+				return vm, err
 			}
 
 		case ops.Select:
-			if vm.isPolymorphic() {
-				continue
+			op, err := vm.popOperand()
+			if err != nil {
+				return vm, err
 			}
-			operands := make([]operand, 2)
-			c, under := vm.popOperand()
-			if under || c.Type != wasm.ValueTypeI32 {
-				return vm, InvalidTypeError{wasm.ValueTypeI32, c.Type}
+			if !op.Equal(wasm.ValueTypeI32) {
+				return vm, InvalidTypeError{wasm.ValueTypeI32, op.Type}
 			}
 
+			operands := make([]operand, 2)
 			for i := 0; i < 2; i++ {
-				operand, under := vm.popOperand()
-				if !vm.isPolymorphic() && under {
-					return vm, ErrStackUnderflow
+				operand, err := vm.popOperand()
+				if err != nil {
+					return vm, err
 				}
 				operands[i] = operand
 			}
 
 			// last 2 popped values should be of the same type
-			if operands[0].Type != operands[1].Type {
+			if !operands[0].Equal(operands[1].Type) {
 				return vm, InvalidTypeError{operands[1].Type, operands[2].Type}
 			}
 
@@ -379,10 +471,11 @@ func VerifyModule(module *wasm.Module) error {
 
 	logger.Printf("There are %d functions", len(module.Function.Types))
 	for i, fn := range module.FunctionIndexSpace {
+		logger.Printf("Validating function: %q", fn.Name)
 		if vm, err := verifyBody(fn.Sig, fn.Body, module); err != nil {
 			return Error{vm.pc(), i, err}
 		}
-		logger.Printf("No errors in function %d", i)
+		logger.Printf("No errors in function %d (%q)", i, fn.Name)
 	}
 
 	return nil

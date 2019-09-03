@@ -7,6 +7,8 @@ package validate
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"io"
 
 	"github.com/go-interpreter/wagon/wasm"
@@ -17,28 +19,37 @@ import (
 // mockVM is a minimal implementation of a virtual machine to
 // validate WebAssembly code
 type mockVM struct {
-	stack      []operand
-	stackTop   int // the top of the operand stack
 	origLength int // the original length of the bytecode stream
+	code       *bytes.Reader
 
-	code *bytes.Reader
-
-	polymorphic bool    // whether the base implicit block has a polymorphic stack
-	blocks      []block // a stack of encountered blocks
+	stack      []operand
+	ctrlFrames []frame // a stack of encountered blocks
 
 	curFunc *wasm.FunctionSig
 }
 
-// a block represents an instruction sequence preceded by a control flow operator
-// it is used to verify that the block signature set by the operator is the correct
-// one when the block ends
-type block struct {
-	pc          int            // the pc where the control flow operator starting the block is located
-	stackTop    int            // stack top when the block started
-	blockType   wasm.BlockType // block_type signature of the control operator
-	op          byte           // opcode for the operator starting the new block
-	polymorphic bool           // whether the block has a polymorphic stack
-	loop        bool           // whether the block is the body of a loop instruction
+// a frame represents a structured control instruction & any corresponding
+// blocks.
+type frame struct {
+	pc          int              // the pc of the instruction declaring the frame
+	labelTypes  []wasm.ValueType // types signatures of associated labels
+	endTypes    []wasm.ValueType // type signatures of frame return values
+	stackHeight int              // height of the stack when the frame was started
+
+	op          byte // opcode for the operator starting the new block
+	unreachable bool // whether the frame has been marked unreachable
+}
+
+func (f *frame) matchingLabelTypes(in *frame) error {
+	if len(f.labelTypes) != len(in.labelTypes) {
+		return fmt.Errorf("label type len mismatch: %d != %d", len(f.labelTypes), len(in.labelTypes))
+	}
+	for i := range f.labelTypes {
+		if (!operand{f.labelTypes[i]}.Equal(in.labelTypes[i])) {
+			return InvalidTypeError{f.labelTypes[i], in.labelTypes[i]}
+		}
+	}
+	return nil
 }
 
 func (vm *mockVM) fetchVarUint() (uint32, error) {
@@ -75,150 +86,112 @@ func (vm *mockVM) fetchUint64() (uint64, error) {
 	return binary.LittleEndian.Uint64(buf[:]), nil
 }
 
-func (vm *mockVM) pushBlock(op byte, blockType wasm.BlockType) {
-	logger.Printf("Pushing block %v", blockType)
-	vm.blocks = append(vm.blocks, block{
+func (vm *mockVM) pushFrame(op byte, labelTypes, returnTypes []wasm.ValueType) {
+	vm.ctrlFrames = append(vm.ctrlFrames, frame{
 		pc:          vm.pc(),
-		stackTop:    vm.stackTop,
-		blockType:   blockType,
-		polymorphic: vm.isPolymorphic(),
+		stackHeight: len(vm.stack),
+		labelTypes:  labelTypes,
+		endTypes:    returnTypes,
 		op:          op,
-		loop:        op == ops.Loop,
 	})
+	logger.Printf("Pushed frame %+v", vm.topFrame())
 }
 
-// Get a block from it's relative nesting depth
-func (vm *mockVM) getBlockFromDepth(depth int) *block {
-	if depth >= len(vm.blocks) {
+// Get a frame from it's relative nesting depth
+func (vm *mockVM) getFrameFromDepth(depth int) *frame {
+	if depth >= len(vm.ctrlFrames) {
 		return nil
 	}
 
-	return &vm.blocks[len(vm.blocks)-1-depth]
+	return &vm.ctrlFrames[len(vm.ctrlFrames)-1-depth]
 }
 
-// Returns nil if depth is a valid nesting depth value that can be
-// branched to.
-func (vm *mockVM) canBranch(depth int) error {
-	blockType := wasm.BlockTypeEmpty
-
-	block := vm.getBlockFromDepth(depth)
-	// jumping to the start of a loop block doesn't push a value
-	// on the stack.
-	if block == nil {
-		if depth == len(vm.blocks) {
-			// equivalent to a `return', as the function
-			// body is an "implicit" block
-			if len(vm.curFunc.ReturnTypes) != 0 {
-				blockType = wasm.BlockType(vm.curFunc.ReturnTypes[0])
-			}
-		} else {
-			return InvalidLabelError(uint32(depth))
-		}
-	} else if !block.loop {
-		blockType = block.blockType
+func (vm *mockVM) popFrame() (*frame, error) {
+	top := vm.topFrame()
+	if top == nil {
+		return nil, errors.New("missing frame")
 	}
 
-	if blockType != wasm.BlockTypeEmpty {
-		top, under := vm.topOperand()
-		if under || top.Type != wasm.ValueType(blockType) {
-			return InvalidTypeError{wasm.ValueType(blockType), top.Type}
+	for i := len(top.endTypes) - 1; i >= 0; i-- {
+		ret := top.endTypes[i]
+		op, err := vm.popOperand()
+		if err != nil {
+			return nil, err
+		}
+		if !op.Equal(ret) {
+			return nil, InvalidTypeError{ret, op.Type}
 		}
 	}
+	if len(vm.stack) != top.stackHeight {
+		return nil, errors.New("unbalanced stack")
+	}
+	logger.Printf("Removing frame: %+v", top)
+	vm.ctrlFrames = vm.ctrlFrames[:len(vm.ctrlFrames)-1]
+	logger.Printf("ctrlFrames = %+v", vm.ctrlFrames)
 
-	return nil
+	return top, nil
 }
 
-// returns nil in case of an underflow
-func (vm *mockVM) popBlock() *block {
-	if len(vm.blocks) == 0 {
+func (vm *mockVM) topFrame() *frame {
+	if len(vm.ctrlFrames) == 0 {
 		return nil
 	}
-
-	stackTop := len(vm.blocks) - 1
-	block := vm.blocks[stackTop]
-	vm.blocks = append(vm.blocks[:stackTop], vm.blocks[stackTop+1:]...)
-
-	return &block
+	return &vm.ctrlFrames[len(vm.ctrlFrames)-1]
 }
 
-func (vm *mockVM) topBlock() *block {
-	if len(vm.blocks) == 0 {
-		return nil
-	}
-
-	return &vm.blocks[len(vm.blocks)-1]
+func (vm *mockVM) topFrameUnreachable() bool {
+	return vm.topFrame().unreachable
 }
 
-func (vm *mockVM) topOperand() (o operand, under bool) {
-	stackTop := vm.stackTop - 1
-	if stackTop == -1 {
-		under = true
-		return
+// popOperand returns details about a potential operand on the stack.
+// If there are no values on the stack and the current frame is unreachable,
+// an operand of unknown type is returned.
+func (vm *mockVM) popOperand() (op operand, err error) {
+	logger.Printf("Stack before pop: %+v", vm.stack)
+	logger.Printf("Frame before pop: %+v", vm.topFrame())
+	if len(vm.stack) == vm.topFrame().stackHeight {
+		if vm.topFrameUnreachable() {
+			return operand{unknownType}, nil
+		}
+		return op, ErrStackUnderflow
 	}
-	o = vm.stack[stackTop]
-	return
-}
+	nl := len(vm.stack) - 1
+	op = vm.stack[nl]
+	vm.stack = vm.stack[:nl]
 
-func (vm *mockVM) popOperand() (operand, bool) {
-	var o operand
-	stackTop := vm.stackTop - 1
-	if stackTop == -1 {
-		return o, true
-	}
-	o = vm.stack[stackTop]
-	vm.stackTop--
-
-	logger.Printf("Stack after pop is %v. Popped %v", vm.stack[:vm.stackTop], o)
-	return o, false
+	logger.Printf("Stack after pop is %v. Popped %v", vm.stack, op)
+	return op, nil
 }
 
 func (vm *mockVM) pushOperand(t wasm.ValueType) {
 	o := operand{t}
-	logger.Printf("Stack top: %d, Len of stack :%d", vm.stackTop, len(vm.stack))
-	if vm.stackTop == len(vm.stack) {
-		vm.stack = append(vm.stack, o)
-	} else {
-		vm.stack[vm.stackTop] = o
-	}
-	vm.stackTop++
+	// logger.Printf("Stack top: %d, Len of stack :%d", vm.stack[len(vm.stack)-1], len(vm.stack))
+	vm.stack = append(vm.stack, o)
 
-	logger.Printf("Stack after push is %v. Pushed %v", vm.stack[:vm.stackTop], o)
+	logger.Printf("Stack after push is %v. Pushed %v", vm.stack, o)
 }
 
 func (vm *mockVM) adjustStack(op ops.Op) error {
 	for _, t := range op.Args {
-		op, under := vm.popOperand()
-		if !vm.isPolymorphic() && (under || op.Type != t) {
+		op, err := vm.popOperand()
+		if err != nil {
+			return err
+		}
+		if !op.Equal(t) {
 			return InvalidTypeError{t, op.Type}
 		}
 	}
 
-	if op.Returns != wasm.ValueType(wasm.BlockTypeEmpty) {
+	if op.Returns != noReturn {
 		vm.pushOperand(op.Returns)
 	}
-
 	return nil
 }
 
-// setPolymorphic sets the current block as having a polymorphic stack
-// blocks created under it will be polymorphic too. All type-checking
-// is ignored in a polymorphic stack.
-// (See https://github.com/WebAssembly/design/blob/27ac254c854994103c24834a994be16f74f54186/Semantics.md#validation)
-func (vm *mockVM) setPolymorphic() {
-	if len(vm.blocks) == 0 {
-		vm.polymorphic = true
-	} else {
-
-		vm.blocks[len(vm.blocks)-1].polymorphic = true
-	}
-}
-
-func (vm *mockVM) isPolymorphic() bool {
-	if len(vm.blocks) == 0 {
-		return vm.polymorphic
-	}
-
-	return vm.topBlock().polymorphic
+func (vm *mockVM) setUnreachable() {
+	frame := vm.topFrame()
+	frame.unreachable = true
+	vm.stack = vm.stack[:frame.stackHeight]
 }
 
 func (vm *mockVM) pc() int {
