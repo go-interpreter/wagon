@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// package validate provides functions for validating WebAssembly modules.
+// Package validate provides functions for validating WebAssembly modules.
 package validate
 
 import (
@@ -11,6 +11,7 @@ import (
 	"io"
 
 	"github.com/go-interpreter/wagon/wasm"
+	"github.com/go-interpreter/wagon/wasm/operators"
 	ops "github.com/go-interpreter/wagon/wasm/operators"
 )
 
@@ -23,7 +24,9 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 
 		ctrlFrames: []frame{
 			// The outermost frame is the function itself.
-			{endTypes: fn.ReturnTypes},
+			// endTypes is not populated as function return types
+			// are validated separately.
+			{op: operators.Call},
 		},
 		curFunc: fn,
 	}
@@ -109,17 +112,16 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 			vm.pushFrame(op, frame.endTypes, frame.endTypes)
 
 		case ops.End:
+			// Block 'return' type is validated in popFrame().
 			frame, err := vm.popFrame()
 			if err != nil {
 				return vm, err
 			}
-			if frame == nil {
+			if frame == nil || frame.op == operators.Call {
 				return vm, UnmatchedOpError(op)
 			}
-			for _, ret := range frame.endTypes {
-				if ret != noReturn {
-					vm.pushOperand(ret)
-				}
+			for _, t := range frame.endTypes {
+				vm.pushOperand(t)
 			}
 
 		case ops.Br:
@@ -322,7 +324,7 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 		case ops.I32Load, ops.I64Load, ops.F32Load, ops.F64Load, ops.I32Load8s, ops.I32Load8u, ops.I32Load16s, ops.I32Load16u, ops.I64Load8s, ops.I64Load8u, ops.I64Load16s, ops.I64Load16u, ops.I64Load32s, ops.I64Load32u, ops.I32Store, ops.I64Store, ops.F32Store, ops.F64Store, ops.I32Store8, ops.I32Store16, ops.I64Store8, ops.I64Store16, ops.I64Store32:
 			// read memory_immediate
 			// flags
-			_, err := vm.fetchVarUint()
+			align, err := vm.fetchVarUint()
 			if err != nil {
 				return vm, err
 			}
@@ -332,13 +334,32 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 				return vm, err
 			}
 
+			switch op {
+			case ops.I32Load8s, ops.I32Load8u, ops.I64Load8s, ops.I64Load8u:
+				if align > 1 {
+					return vm, InvalidImmediateError{OpName: opStruct.Name, ImmType: "naturally aligned"}
+				}
+			case ops.I32Load16s, ops.I32Load16u, ops.I64Load16s, ops.I64Load16u:
+				if align > 2 {
+					return vm, InvalidImmediateError{OpName: opStruct.Name, ImmType: "naturally aligned"}
+				}
+			case ops.I32Load, ops.I64Load32s, ops.I64Load32u, ops.F32Load:
+				if align > 4 {
+					return vm, InvalidImmediateError{OpName: opStruct.Name, ImmType: "naturally aligned"}
+				}
+			case ops.I64Load, ops.F64Load:
+				if align > 8 {
+					return vm, InvalidImmediateError{OpName: opStruct.Name, ImmType: "naturally aligned"}
+				}
+			}
+
 		case ops.CurrentMemory, ops.GrowMemory:
 			memIndex, err := vm.fetchByte()
 			if err != nil {
 				return vm, err
 			}
 			if memIndex != 0x00 {
-				return vm, errors.New("validate: memory index must be 0")
+				return vm, InvalidTableIndexError{"memory", uint32(memIndex)}
 			}
 
 		case ops.Call:
@@ -393,7 +414,7 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 				return vm, err
 			}
 			if tableIndex != 0x00 {
-				return vm, errors.New("validate: table index in call_indirect must be 0")
+				return vm, InvalidTableIndexError{"table", uint32(tableIndex)}
 			}
 
 			if index >= uint32(len(module.Types.Entries)) {
@@ -454,6 +475,34 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 
 			vm.pushOperand(operands[1].Type)
 		}
+	}
+
+	switch len(fn.ReturnTypes) {
+	case 0:
+		op, err := vm.popOperand()
+		switch {
+		case !vm.topFrameUnreachable() && err == nil:
+			return vm, UnbalancedStackErr(op.Type)
+		case err == ErrStackUnderflow:
+		default:
+			return vm, err
+		}
+	case 1:
+		op, err := vm.popOperand()
+		if err != nil {
+			return vm, err
+		}
+		if !op.Equal(fn.ReturnTypes[0]) {
+			return vm, InvalidTypeError{fn.ReturnTypes[0], op.Type}
+		}
+	}
+
+	f, err := vm.popFrame()
+	if err != nil {
+		return vm, err
+	}
+	if f.op != operators.Call {
+		return vm, UnmatchedOpError(f.op)
 	}
 
 	return vm, nil

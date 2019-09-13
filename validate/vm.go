@@ -123,13 +123,22 @@ func (vm *mockVM) popFrame() (*frame, error) {
 		}
 	}
 	if len(vm.stack) != top.stackHeight {
-		return nil, errors.New("unbalanced stack")
+		return nil, UnbalancedStackErr(vm.topOperand().Type)
 	}
 	logger.Printf("Removing frame: %+v", top)
 	vm.ctrlFrames = vm.ctrlFrames[:len(vm.ctrlFrames)-1]
 	logger.Printf("ctrlFrames = %+v", vm.ctrlFrames)
 
 	return top, nil
+}
+
+func (vm *mockVM) topOperand() operand {
+	o, err := vm.popOperand()
+	if err != nil {
+		return operand{}
+	}
+	vm.pushOperand(o.Type)
+	return o
 }
 
 func (vm *mockVM) topFrame() *frame {
