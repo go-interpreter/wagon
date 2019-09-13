@@ -1006,6 +1006,12 @@ func TestDivOps(t *testing.T) {
 			Result: 3,
 		},
 		{
+			Name:   "I64-unsigned-divide-3",
+			Op:     ops.I64DivU,
+			Args:   []uint64{200, 20},
+			Result: 10,
+		},
+		{
 			Name:   "I64-unsigned-remainder-1",
 			Op:     ops.I64RemU,
 			Args:   []uint64{7, 2},
@@ -1100,6 +1106,92 @@ func TestDivOps(t *testing.T) {
 			}
 			if got, want := fakeStack[0], tc.Result; got != want {
 				t.Errorf("fakeStack[0] = %d, want %d", got, want)
+			}
+		})
+	}
+}
+
+func TestDivideByZero(t *testing.T) {
+	if !supportedOS(runtime.GOOS) {
+		t.SkipNow()
+	}
+	testCases := []struct {
+		Name string
+		Op   byte
+		Args []uint64
+	}{
+		{
+			Name: "I64-unsigned-divide",
+			Op:   ops.I64DivU,
+			Args: []uint64{88, 0},
+		},
+		{
+			Name: "I64-signed-divide",
+			Op:   ops.I64DivS,
+			Args: []uint64{88, 0},
+		},
+		{
+			Name: "I32-unsigned-divide",
+			Op:   ops.I32DivU,
+			Args: []uint64{88, 0},
+		},
+		{
+			Name: "I32-signed-divide",
+			Op:   ops.I32DivS,
+			Args: []uint64{88, 0},
+		},
+		{
+			Name: "I64-unsigned-rem",
+			Op:   ops.I64RemU,
+			Args: []uint64{88, 0},
+		},
+		{
+			Name: "I64-signed-rem",
+			Op:   ops.I64RemS,
+			Args: []uint64{88, 0},
+		},
+		{
+			Name: "I32-unsigned-rem",
+			Op:   ops.I32RemU,
+			Args: []uint64{88, 0},
+		},
+		{
+			Name: "I32-signed-rem",
+			Op:   ops.I32RemS,
+			Args: []uint64{88, 0},
+		},
+	}
+
+	allocator := &MMapAllocator{}
+	defer allocator.Close()
+	b := &AMD64Backend{}
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			builder, err := asm.NewBuilder("amd64", 64)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b.emitPreamble(builder)
+
+			for _, arg := range tc.Args {
+				b.emitPushImmediate(builder, currentInstruction{}, arg)
+			}
+			b.emitDivide(builder, currentInstruction{inst: InstructionMetadata{Op: tc.Op}})
+			b.emitPostamble(builder)
+			b.lowerAMD64(builder)
+			out := builder.Assemble()
+
+			nativeBlock, err := allocator.AllocateExec(out)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			fakeStack := make([]uint64, 0, 5)
+			fakeLocals := make([]uint64, 0, 0)
+			exit := nativeBlock.Invoke(&fakeStack, &fakeLocals, nil, nil)
+
+			if exit.CompletionStatus() != CompletionDivideZero {
+				t.Fatalf("completion status = %v, want CompletionDivideZero", exit.CompletionStatus())
 			}
 		})
 	}

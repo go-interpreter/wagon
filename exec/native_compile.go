@@ -164,6 +164,8 @@ func (vm *VM) nativeCodeInvocation(asmIndex uint32) {
 		panic("fatal error in native execution")
 	case compile.CompletionBadBounds:
 		panic("exec: out of bounds memory access")
+	case compile.CompletionDivideZero:
+		panic("runtime error: integer divide by zero")
 	}
 	vm.ctx.pc = int64(block.resumePC)
 }

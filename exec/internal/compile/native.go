@@ -31,6 +31,7 @@ const (
 	CompletionBadBounds
 	CompletionUnreachable
 	CompletionFatalInternalError
+	CompletionDivideZero
 )
 
 func makeExitIndex(idx int) CompletionStatus {

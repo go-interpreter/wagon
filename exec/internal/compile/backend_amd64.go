@@ -1064,7 +1064,29 @@ func (b *AMD64Backend) emitDivide(builder *asm.Builder, ci currentInstruction) {
 	b.emitSymbolicPopToReg(builder, ci, x86.REG_R9)
 	b.emitSymbolicPopToReg(builder, ci, x86.REG_AX)
 
+	// tst r9, r9
 	prog := builder.NewProg()
+	prog.As = x86.ATESTQ
+	prog.From.Type = obj.TYPE_REG
+	prog.From.Reg = x86.REG_R9
+	prog.To.Type = obj.TYPE_REG
+	prog.To.Reg = x86.REG_R9
+	builder.AddInstruction(prog)
+
+	// jne notZero
+	jmp := builder.NewProg()
+	jmp.As = x86.AJNE
+	jmp.To.Type = obj.TYPE_BRANCH
+	builder.AddInstruction(jmp)
+	b.emitExit(builder, CompletionDivideZero|makeExitIndex(ci.idx), false)
+
+	// notZero:
+	prog = builder.NewProg()
+	prog.As = obj.ANOP // branch target - assembler will optimize out.
+	jmp.Pcond = prog
+	builder.AddInstruction(prog)
+
+	prog = builder.NewProg()
 	prog.As = x86.AXORQ
 	prog.From.Type = obj.TYPE_REG
 	prog.From.Reg = x86.REG_DX
