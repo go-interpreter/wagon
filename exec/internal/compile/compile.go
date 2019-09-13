@@ -206,29 +206,15 @@ func Compile(disassembly []disasm.Instr) ([]byte, *BytecodeMetadata) {
 				offset:    int64(buffer.Len()),
 				ifBlock:   false,
 				loopBlock: true,
-				discard:   *instr.NewStack,
 			}
 			continue
 		case ops.Block:
 			curBlockDepth++
 			blocks[curBlockDepth] = &block{
 				ifBlock: false,
-				discard: *instr.NewStack,
 			}
 			continue
 		case ops.Else:
-			ifInstr := disassembly[instr.Block.ElseIfIndex] // the corresponding `if` instruction for this else
-			if ifInstr.NewStack != nil && ifInstr.NewStack.StackTopDiff != 0 {
-				// add code for jumping out of a taken if branch
-				op := OpDiscard
-				if ifInstr.NewStack.PreserveTop {
-					op = OpDiscardPreserveTop
-				}
-
-				emitMetadata(op, buffer.Len(), instAndInt64Len)
-				buffer.WriteByte(op)
-				binary.Write(buffer, binary.LittleEndian, ifInstr.NewStack.StackTopDiff)
-			}
 			emitMetadata(OpJmp, buffer.Len(), instAndInt64Len)
 			buffer.WriteByte(OpJmp)
 			ifBlockEndOffset := int64(buffer.Len())
@@ -246,21 +232,6 @@ func Compile(disassembly []disasm.Instr) ([]byte, *BytecodeMetadata) {
 		case ops.End:
 			depth := curBlockDepth
 			block := blocks[depth]
-
-			if instr.NewStack.StackTopDiff != 0 {
-				// when exiting a block, discard elements to
-				// restore stack height.
-				op := OpDiscard
-				if instr.NewStack.PreserveTop {
-					// this is true when the block has a
-					// signature, and therefore pushes
-					// a value on to the stack
-					op = OpDiscardPreserveTop
-				}
-				emitMetadata(op, buffer.Len(), instAndInt64Len)
-				buffer.WriteByte(op)
-				binary.Write(buffer, binary.LittleEndian, instr.NewStack.StackTopDiff)
-			}
 
 			if !block.loopBlock { // is a normal block
 				block.offset = int64(buffer.Len())

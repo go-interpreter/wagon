@@ -6,6 +6,7 @@ package wasm
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"reflect"
 )
@@ -82,6 +83,7 @@ func (m *Module) populateFunctions() error {
 	}
 
 	funcs := make([]uint32, 0, len(m.Function.Types)+len(m.imports.Funcs))
+
 	funcs = append(funcs, m.imports.Funcs...)
 	funcs = append(funcs, m.Function.Types...)
 	m.Function.Types = funcs
@@ -96,6 +98,36 @@ func (m *Module) GetFunction(i int) *Function {
 	}
 
 	return &m.FunctionIndexSpace[i]
+}
+
+func (m *Module) GetFunctionSig(i uint32) (*FunctionSig, error) {
+	var funcindex uint32
+	if m.Import == nil {
+		if i >= uint32(len(m.Function.Types)) {
+			return nil, errors.New("fsig out of len")
+		}
+		typeindex := m.Function.Types[i]
+		return &m.Types.Entries[typeindex], nil
+	}
+
+	for _, importEntry := range m.Import.Entries {
+		if importEntry.Type.Kind() == ExternalFunction {
+			if funcindex == i {
+				typeindex := importEntry.Type.(FuncImport).Type
+				return &m.Types.Entries[typeindex], nil
+			}
+
+			funcindex++
+		}
+	}
+
+	i = i - (funcindex - uint32(len(m.imports.Funcs)))
+	if i >= uint32(len(m.Function.Types)) {
+		return nil, errors.New("fsig out of len")
+	}
+
+	typeindex := m.Function.Types[i]
+	return &m.Types.Entries[typeindex], nil
 }
 
 func (m *Module) populateGlobals() error {
@@ -116,6 +148,33 @@ func (m *Module) GetGlobal(i int) *GlobalEntry {
 	}
 
 	return &m.GlobalIndexSpace[i]
+}
+
+func (m *Module) GetGlobalType(i uint32) (*GlobalVar, error) {
+	var globalindex uint32
+
+	if m.Import == nil {
+		if i >= uint32(len(m.Global.Globals)) {
+			return nil, errors.New("global index out of len")
+		}
+		return &m.Global.Globals[i].Type, nil
+	}
+
+	for _, importEntry := range m.Import.Entries {
+		if importEntry.Type.Kind() == ExternalGlobal {
+			if globalindex == i {
+				v := importEntry.Type.(GlobalVarImport).Type
+				return &v, nil
+			}
+			globalindex++
+		}
+	}
+
+	i = i - (globalindex - uint32(m.imports.Globals))
+	if i >= uint32(len(m.Global.Globals)) {
+		return nil, errors.New("global index out of len")
+	}
+	return &m.Global.Globals[i].Type, nil
 }
 
 func (m *Module) populateTables() error {

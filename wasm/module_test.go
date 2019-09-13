@@ -7,6 +7,7 @@ package wasm_test
 import (
 	"bytes"
 	"io/ioutil"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -172,4 +173,94 @@ func TestModuleSignatureCheck(t *testing.T) {
 func TestDuplicateExportError_NoStackOverflow(t *testing.T) {
 	err := wasm.DuplicateExportError("h")
 	_ = err.Error()
+}
+
+func TestGetFuntionSig(t *testing.T) {
+	f, err := os.Open("testdata/spec/sigtest.wasm")
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	defer f.Close()
+	m, err := wasm.ReadModule(f, nil)
+	if err != nil {
+		t.Fatalf("error reading module %v", err)
+	}
+
+	// check first sig
+	fsig, err := m.GetFunctionSig(0)
+	if err != nil {
+		t.Fatalf("get fsig error")
+	}
+	if !(len(fsig.ParamTypes) == 1 && fsig.ParamTypes[0] == wasm.ValueTypeI64) {
+		t.Fatalf("error param sig, %v", fsig.ParamTypes)
+	}
+	if !(len(fsig.ReturnTypes) == 1 && fsig.ReturnTypes[0] == wasm.ValueTypeI64) {
+		t.Fatalf("error return sig, %v", fsig.ReturnTypes)
+	}
+
+	// check second sig
+	fsig, err = m.GetFunctionSig(1)
+	if err != nil {
+		t.Fatalf("get fsig error")
+	}
+	if !(len(fsig.ParamTypes) == 2 && fsig.ParamTypes[0] == wasm.ValueTypeI32 && fsig.ParamTypes[1] == wasm.ValueTypeI32) {
+		t.Fatalf("error param sig, %v", fsig.ParamTypes)
+	}
+	if !(len(fsig.ReturnTypes) == 1 && fsig.ReturnTypes[0] == wasm.ValueTypeI32) {
+		t.Fatalf("error return sig, %v", fsig.ReturnTypes)
+	}
+
+	// check third sig
+	fsig, err = m.GetFunctionSig(2)
+	if err != nil {
+		t.Fatalf("get fsig error")
+	}
+	if !(len(fsig.ParamTypes) == 1 && fsig.ParamTypes[0] == wasm.ValueTypeI32) {
+		t.Fatalf("error param sig, %v", fsig.ParamTypes)
+	}
+	if !(len(fsig.ReturnTypes) == 1 && fsig.ReturnTypes[0] == wasm.ValueTypeI32) {
+		t.Fatalf("error return sig, %v", fsig.ReturnTypes)
+	}
+
+	// check fourth sig
+	fsig, err = m.GetFunctionSig(3)
+	if err != nil {
+		t.Fatalf("get fsig error")
+	}
+	if !(len(fsig.ParamTypes) == 0) {
+		t.Fatalf("error param sig, %v", fsig.ParamTypes)
+	}
+	if !(len(fsig.ReturnTypes) == 1) && fsig.ReturnTypes[0] == wasm.ValueTypeI32 {
+		t.Fatalf("error return sig, %v", fsig.ReturnTypes)
+	}
+
+	fsig, err = m.GetFunctionSig(4)
+	if err == nil {
+		t.Fatalf("get fsig error")
+	}
+
+	// check global var sig
+	gsig, err := m.GetGlobalType(0)
+	if err != nil {
+		t.Fatalf("get global type error")
+	}
+
+	if gsig.Type != wasm.ValueTypeI64 {
+		t.Fatalf("error global type sig, %v", gsig.Type)
+	}
+
+	gsig, err = m.GetGlobalType(1)
+	if err != nil {
+		t.Fatalf("get global type error")
+	}
+
+	if gsig.Type != wasm.ValueTypeI32 {
+		t.Fatalf("error global type sig, %v", gsig.Type)
+	}
+
+	gsig, err = m.GetGlobalType(2)
+	if err == nil {
+		t.Fatalf("get global type error")
+	}
+
 }

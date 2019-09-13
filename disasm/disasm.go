@@ -107,7 +107,6 @@ func NewDisassembly(fn wasm.Function, module *wasm.Module) (*Disassembly, error)
 	stackDepths.Push(0)
 	blockIndices := &stack.Stack{} // a stack of indices to operators which start new blocks
 	curIndex := 0
-	var lastOpReturn bool
 
 	for _, instr := range instrs {
 		logger.Printf("stack top is %d", stackDepths.Top())
@@ -129,13 +128,28 @@ func NewDisassembly(fn wasm.Function, module *wasm.Module) (*Disassembly, error)
 			instr.Unreachable = !isInstrReachable(blockPolymorphicOps)
 		}
 
+		var blockStartIndex uint64
+		switch op {
+		case ops.End, ops.Else:
+			blockStartIndex = blockIndices.Pop()
+			if op == ops.Else {
+				blockIndices.Push(uint64(curIndex))
+			}
+		case ops.Block, ops.Loop, ops.If:
+			blockIndices.Push(uint64(curIndex))
+		}
+
+		if instr.Unreachable {
+			continue
+		}
+
 		logger.Printf("op: %s, unreachable: %v", opStr.Name, instr.Unreachable)
-		if !opStr.Polymorphic && !instr.Unreachable {
+		if !opStr.Polymorphic {
 			top := int(stackDepths.Top())
 			top -= len(opStr.Args)
 			stackDepths.SetTop(uint64(top))
-			if top < -1 {
-				return nil, ErrStackUnderflow
+			if top < 0 {
+				panic("underflow during validation")
 			}
 			if opStr.Returns != wasm.ValueType(wasm.BlockTypeEmpty) {
 				top++
@@ -148,23 +162,13 @@ func NewDisassembly(fn wasm.Function, module *wasm.Module) (*Disassembly, error)
 		case ops.Unreachable:
 			pushPolymorphicOp(blockPolymorphicOps, curIndex)
 		case ops.Drop:
-			if !instr.Unreachable {
-				stackDepths.SetTop(stackDepths.Top() - 1)
-			}
+			stackDepths.SetTop(stackDepths.Top() - 1)
 		case ops.Select:
-			if !instr.Unreachable {
-				stackDepths.SetTop(stackDepths.Top() - 2)
-			}
+			stackDepths.SetTop(stackDepths.Top() - 2)
 		case ops.Return:
-			if !instr.Unreachable {
-				stackDepths.SetTop(stackDepths.Top() - uint64(len(fn.Sig.ReturnTypes)))
-			}
+			stackDepths.SetTop(stackDepths.Top() - uint64(len(fn.Sig.ReturnTypes)))
 			pushPolymorphicOp(blockPolymorphicOps, curIndex)
-			lastOpReturn = true
 		case ops.End, ops.Else:
-			// The max depth reached while execing the current block
-			curDepth := stackDepths.Top()
-			blockStartIndex := blockIndices.Pop()
 			blockSig := disas.Code[blockStartIndex].Block.Signature
 			instr.Block = &BlockInfo{
 				Start:     false,
@@ -175,7 +179,7 @@ func NewDisassembly(fn wasm.Function, module *wasm.Module) (*Disassembly, error)
 				disas.Code[blockStartIndex].Block.EndIndex = curIndex
 			} else { // ops.Else
 				instr.Block.ElseIfIndex = int(blockStartIndex)
-				disas.Code[blockStartIndex].Block.IfElseIndex = int(blockStartIndex)
+				disas.Code[blockStartIndex].Block.IfElseIndex = int(curIndex)
 			}
 
 			// The max depth reached while execing the last block
@@ -187,60 +191,28 @@ func NewDisassembly(fn wasm.Function, module *wasm.Module) (*Disassembly, error)
 			prevDepthIndex := stackDepths.Len() - 2
 			prevDepth := stackDepths.Get(prevDepthIndex)
 
-			if op != ops.Else && blockSig != wasm.BlockTypeEmpty && !instr.Unreachable {
+			if op != ops.Else && blockSig != wasm.BlockTypeEmpty {
 				stackDepths.Set(prevDepthIndex, prevDepth+1)
 				disas.checkMaxDepth(int(stackDepths.Get(prevDepthIndex)))
 			}
 
-			if !lastOpReturn {
-				elemsDiscard := int(curDepth) - int(prevDepth)
-				if elemsDiscard < -1 {
-					return nil, ErrStackUnderflow
-				}
-				instr.NewStack = &StackInfo{
-					StackTopDiff: int64(elemsDiscard),
-					PreserveTop:  blockSig != wasm.BlockTypeEmpty,
-				}
-				logger.Printf("discard %d elements, preserve top: %v", elemsDiscard, instr.NewStack.PreserveTop)
-			} else {
-				instr.NewStack = &StackInfo{}
-			}
-
 			logger.Printf("setting new stack for %s block (%d)", disas.Code[blockStartIndex].Op.Name, blockStartIndex)
-			disas.Code[blockStartIndex].NewStack = instr.NewStack
-			if !instr.Unreachable {
-				blockPolymorphicOps = blockPolymorphicOps[:len(blockPolymorphicOps)-1]
-			}
+			blockPolymorphicOps = blockPolymorphicOps[:len(blockPolymorphicOps)-1]
 
 			stackDepths.Pop()
 			if op == ops.Else {
 				stackDepths.Push(stackDepths.Top())
-				blockIndices.Push(uint64(curIndex))
-				if !instr.Unreachable {
-					blockPolymorphicOps = append(blockPolymorphicOps, []int{})
-				}
+				blockPolymorphicOps = append(blockPolymorphicOps, []int{})
 			}
-
 		case ops.Block, ops.Loop, ops.If:
 			sig := instr.Immediates[0].(wasm.BlockType)
 			logger.Printf("if, depth is %d", stackDepths.Top())
 			stackDepths.Push(stackDepths.Top())
-			// If this new block is unreachable, its
-			// entire instruction sequence is unreachable
-			// as well. To make sure that isInstrReachable
-			// returns the correct value, we don't push a new
-			// array to blockPolymorphicOps.
-			if !instr.Unreachable {
-				// Therefore, only push a new array if this instruction
-				// is reachable.
-				blockPolymorphicOps = append(blockPolymorphicOps, []int{})
-			}
+			blockPolymorphicOps = append(blockPolymorphicOps, []int{})
 			instr.Block = &BlockInfo{
 				Start:     true,
 				Signature: sig,
 			}
-
-			blockIndices.Push(uint64(curIndex))
 		case ops.Br, ops.BrIf:
 			depth := instr.Immediates[0].(uint32)
 			if int(depth) == blockIndices.Len() {
@@ -260,10 +232,13 @@ func NewDisassembly(fn wasm.Function, module *wasm.Module) (*Disassembly, error)
 
 				// No need to subtract 2 here, we are getting the block
 				// we need to branch to.
-				index := blockIndices.Get(blockIndices.Len() - 1 - int(depth))
-				instr.NewStack = &StackInfo{
-					StackTopDiff: int64(elemsDiscard),
-					PreserveTop:  disas.Code[index].Block.Signature != wasm.BlockTypeEmpty,
+				// No need Discard one. and PreserveTop.
+				if elemsDiscard > 1 {
+					index := blockIndices.Get(blockIndices.Len() - 1 - int(depth))
+					instr.NewStack = &StackInfo{
+						StackTopDiff: int64(elemsDiscard),
+						PreserveTop:  disas.Code[index].Block.Signature != wasm.BlockTypeEmpty,
+					}
 				}
 			}
 			if op == ops.Br {
@@ -271,9 +246,7 @@ func NewDisassembly(fn wasm.Function, module *wasm.Module) (*Disassembly, error)
 			}
 
 		case ops.BrTable:
-			if !instr.Unreachable {
-				stackDepths.SetTop(stackDepths.Top() - 1)
-			}
+			stackDepths.SetTop(stackDepths.Top() - 1)
 			targetCount := instr.Immediates[0].(uint32)
 			for i := uint32(0); i < targetCount; i++ {
 				entry := instr.Immediates[i+1].(uint32)
@@ -318,42 +291,40 @@ func NewDisassembly(fn wasm.Function, module *wasm.Module) (*Disassembly, error)
 			pushPolymorphicOp(blockPolymorphicOps, curIndex)
 		case ops.Call, ops.CallIndirect:
 			index := instr.Immediates[0].(uint32)
-			if !instr.Unreachable {
-				var sig *wasm.FunctionSig
-				top := int(stackDepths.Top())
-				if op == ops.CallIndirect {
-					if module.Types == nil {
-						return nil, errors.New("missing types section")
-					}
-					sig = &module.Types.Entries[index]
-					top--
-				} else {
-					sig = module.GetFunction(int(index)).Sig
-				}
-				top -= len(sig.ParamTypes)
-				top += len(sig.ReturnTypes)
-				stackDepths.SetTop(uint64(top))
-				disas.checkMaxDepth(top)
-			}
-		case ops.GetLocal, ops.SetLocal, ops.TeeLocal, ops.GetGlobal, ops.SetGlobal:
-			if !instr.Unreachable {
-				top := stackDepths.Top()
-				switch op {
-				case ops.GetLocal, ops.GetGlobal:
-					top++
-					stackDepths.SetTop(top)
-					disas.checkMaxDepth(int(top))
-				case ops.SetLocal, ops.SetGlobal:
-					top--
-					stackDepths.SetTop(top)
-				case ops.TeeLocal:
-					// stack remains unchanged for tee_local
-				}
-			}
-		}
+			var sig *wasm.FunctionSig
+			top := int(stackDepths.Top())
 
-		if op != ops.Return {
-			lastOpReturn = false
+			switch op {
+			case ops.CallIndirect:
+				if module.Types == nil {
+					return nil, errors.New("missing types section")
+				}
+				sig = &module.Types.Entries[index]
+				top--
+			default:
+				sig, err = module.GetFunctionSig(index)
+				if err != nil {
+					return nil, err
+				}
+			}
+
+			top -= len(sig.ParamTypes)
+			top += len(sig.ReturnTypes)
+			stackDepths.SetTop(uint64(top))
+			disas.checkMaxDepth(top)
+		case ops.GetLocal, ops.SetLocal, ops.TeeLocal, ops.GetGlobal, ops.SetGlobal:
+			top := stackDepths.Top()
+			switch op {
+			case ops.GetLocal, ops.GetGlobal:
+				top++
+				stackDepths.SetTop(top)
+				disas.checkMaxDepth(int(top))
+			case ops.SetLocal, ops.SetGlobal:
+				top--
+				stackDepths.SetTop(top)
+			case ops.TeeLocal:
+				// stack remains unchanged for tee_local
+			}
 		}
 
 		disas.Code = append(disas.Code, instr)
