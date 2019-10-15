@@ -584,25 +584,6 @@ func TestValidateBlockTypecheck(t *testing.T) {
 			err: UnmatchedOpError(operators.Loop),
 		},
 		{
-			name: "dangling if",
-			// (i32.const 0) (if) (block (nop))
-			code: []byte{
-				operators.I32Const, 0,
-				operators.If, byte(wasm.BlockTypeEmpty),
-				operators.Block, byte(wasm.BlockTypeEmpty), operators.Nop, operators.End,
-			},
-			err: UnmatchedOpError(operators.If),
-		},
-		{
-			name: "dangling else",
-			// (block (nop)) (else (nop))
-			code: []byte{
-				operators.Block, byte(wasm.BlockTypeEmpty), operators.Nop, operators.End,
-				operators.Else, operators.Nop, operators.End,
-			},
-			err: UnmatchedOpError(operators.Else),
-		},
-		{
 			name: "dangling end",
 			// (block (nop)) (nop) (end)
 			code: []byte{
@@ -879,69 +860,6 @@ func TestValidateBlockTypecheck(t *testing.T) {
 			err: nil,
 		},
 		{
-			name: "if i32-i32",
-			// (i32.const 0) (if (result i32) (i32.const 0)) (drop)
-			code: []byte{
-				operators.I32Const, 0,
-				operators.If, byte(wasm.ValueTypeI32),
-				operators.I32Const, 0,
-				operators.End,
-				operators.Drop,
-			},
-			err: nil,
-		},
-		{
-			name: "if else i32-i32-i32",
-			// (i32.const 0) (if (result i32) (i32.const 0) (else (i32.const 1))) (drop)
-			code: []byte{
-				operators.I32Const, 0,
-				operators.If, byte(wasm.ValueTypeI32),
-				operators.I32Const, 0,
-				operators.Else,
-				operators.I32Const, 1,
-				operators.End,
-				operators.Drop,
-			},
-			err: nil,
-		},
-		{
-			name: "if else i32-i32-i64",
-			// (i32.const 0) (if (result i32) (i32.const 0) (else (i64.const 1))) (drop)
-			code: []byte{
-				operators.I32Const, 0,
-				operators.If, byte(wasm.ValueTypeI32),
-				operators.I32Const, 0,
-				operators.Else,
-				operators.I64Const, 1,
-				operators.End,
-				operators.Drop,
-			},
-			err: InvalidTypeError{wasm.ValueTypeI32, wasm.ValueTypeI64},
-		},
-		{
-			name: "if void-i32",
-			// (i32.const 0) (if (result i32) (i32.const 0)) (drop)
-			code: []byte{
-				operators.I32Const, 0,
-				operators.If, byte(wasm.BlockTypeEmpty),
-				operators.I32Const, 0,
-				operators.End,
-				operators.Drop,
-			},
-			err: UnbalancedStackErr(wasm.ValueTypeI32),
-		},
-		{
-			name: "if i32-void",
-			// (i32.const 0) (if (nop))
-			code: []byte{
-				operators.I32Const, 0,
-				operators.If, byte(wasm.ValueTypeI32),
-				operators.Nop,
-				operators.End,
-			},
-			err: ErrStackUnderflow,
-		},
-		{
 			name: "brtable void-void",
 			// (block (block (i32.const 0) (brtable 0 0 1)))
 			code: []byte{
@@ -1009,6 +927,193 @@ func TestValidateBlockTypecheck(t *testing.T) {
 				operators.Drop,
 			},
 			err: nil,
+		},
+	}
+
+	for i := range tcs {
+		tc := tcs[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			mod := wasm.Module{}
+			sig := wasm.FunctionSig{Form: 0x60 /* Must always be 0x60 */}
+			fn := wasm.FunctionBody{Module: &mod, Code: tc.code}
+
+			_, err := verifyBody(&sig, &fn, &mod)
+			if err != tc.err {
+				t.Fatalf("verify returned '%v', want '%v'", err, tc.err)
+			}
+		})
+	}
+}
+
+func TestValidateIfBlock(t *testing.T) {
+	tcs := []struct {
+		name string
+		code []byte
+		err  error
+	}{
+		{
+			name: "if nominal",
+			// (i32.const 0) (if (nop)
+			code: []byte{
+				operators.I32Const, 0,
+				operators.If, byte(wasm.BlockTypeEmpty),
+				operators.Nop,
+				operators.End,
+			},
+			err: nil,
+		},
+		{
+			name: "if else nominal",
+			// (i32.const 0) (if (nop) (else (nop))
+			code: []byte{
+				operators.I32Const, 0,
+				operators.If, byte(wasm.BlockTypeEmpty),
+				operators.Nop,
+				operators.Else,
+				operators.Nop,
+				operators.End,
+			},
+			err: nil,
+		},
+		{
+			name: "if else with value nominal",
+			// (i32.const 0) (if (result i64) (i64.const 1) (else (i64.const 2)) (drop)
+			code: []byte{
+				operators.I32Const, 0,
+				operators.If, byte(wasm.ValueTypeI64),
+				operators.I64Const, 1,
+				operators.Else,
+				operators.I64Const, 2,
+				operators.End,
+				operators.Drop,
+			},
+			err: nil,
+		},
+		{
+			name: "dangling if",
+			// (i32.const 0) (if) (block (nop))
+			code: []byte{
+				operators.I32Const, 0,
+				operators.If, byte(wasm.BlockTypeEmpty),
+				operators.Block, byte(wasm.BlockTypeEmpty), operators.Nop, operators.End,
+			},
+			err: UnmatchedOpError(operators.If),
+		},
+		{
+			name: "dangling else",
+			// (block (nop)) (else (nop))
+			code: []byte{
+				operators.Block, byte(wasm.BlockTypeEmpty), operators.Nop, operators.End,
+				operators.Else, operators.Nop, operators.End,
+			},
+			err: UnmatchedOpError(operators.Else),
+		},
+		{
+			name: "if else i32-i32-i64",
+			// (i32.const 0) (if (result i32) (i32.const 0) (else (i64.const 1))) (drop)
+			code: []byte{
+				operators.I32Const, 0,
+				operators.If, byte(wasm.ValueTypeI32),
+				operators.I32Const, 0,
+				operators.Else,
+				operators.I64Const, 1,
+				operators.End,
+				operators.Drop,
+			},
+			err: InvalidTypeError{wasm.ValueTypeI32, wasm.ValueTypeI64},
+		},
+		{
+			name: "if else i64-i32-i64",
+			// (i32.const 0) (if (result i64) (i32.const 0) (else (i64.const 1))) (drop)
+			code: []byte{
+				operators.I32Const, 0,
+				operators.If, byte(wasm.ValueTypeI64),
+				operators.I32Const, 0,
+				operators.Else,
+				operators.I64Const, 1,
+				operators.End,
+				operators.Drop,
+			},
+			err: InvalidTypeError{wasm.ValueTypeI64, wasm.ValueTypeI32},
+		},
+		{
+			name: "if else i64-i32-i32",
+			// (i32.const 0) (if (result i64) (i32.const 0) (else (i64.const 1))) (drop)
+			code: []byte{
+				operators.I32Const, 0,
+				operators.If, byte(wasm.ValueTypeI64),
+				operators.I32Const, 0,
+				operators.Else,
+				operators.I32Const, 1,
+				operators.End,
+				operators.Drop,
+			},
+			err: InvalidTypeError{wasm.ValueTypeI64, wasm.ValueTypeI32},
+		},
+		{
+			name: "if void-i32",
+			// (i32.const 0) (if (result i32) (i32.const 0)) (drop)
+			code: []byte{
+				operators.I32Const, 0,
+				operators.If, byte(wasm.BlockTypeEmpty),
+				operators.I32Const, 0,
+				operators.End,
+				operators.Drop,
+			},
+			err: UnbalancedStackErr(wasm.ValueTypeI32),
+		},
+		{
+			name: "if i32-void",
+			// (i32.const 0) (if (result i32) (nop))
+			code: []byte{
+				operators.I32Const, 0,
+				operators.If, byte(wasm.ValueTypeI32),
+				operators.Nop,
+				operators.End,
+			},
+			err: ErrStackUnderflow,
+		},
+		{
+			name: "if i32 missing else",
+			// (i32.const 0) (if (nop))
+			code: []byte{
+				operators.I32Const, 0,
+				operators.If, byte(wasm.ValueTypeI32),
+				operators.I32Const, 0,
+				operators.End,
+				operators.Drop,
+			},
+			err: UnmatchedIfValueErr(wasm.ValueTypeI32),
+		},
+		{
+			name: "if with else missing main block result",
+			// (i32.const 0) (if (result i32) (nop) else (i32.const 0))
+			code: []byte{
+				operators.I32Const, 0,
+				operators.If, byte(wasm.ValueTypeI32),
+				operators.Nop,
+				operators.Else,
+				operators.I32Const, 0,
+				operators.End,
+				operators.Drop,
+			},
+			err: ErrStackUnderflow,
+		},
+		{
+			name: "if with else missing else block result",
+			// (i32.const 0) (if (result i32) (i32.const 0) else (nop))
+			code: []byte{
+				operators.I32Const, 0,
+				operators.If, byte(wasm.ValueTypeI32),
+				operators.I32Const, 0,
+				operators.Else,
+				operators.Nop,
+				operators.End,
+				operators.Drop,
+			},
+			err: ErrStackUnderflow,
 		},
 	}
 
