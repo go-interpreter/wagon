@@ -122,7 +122,7 @@ func verifyBody(fn *wasm.FunctionSig, body *wasm.FunctionBody, module *wasm.Modu
 			case frame == nil || frame.op == operators.Call:
 				return vm, UnmatchedOpError(op)
 			// IF block with no else cannot have a result.
-			case (frame.op == operators.If) && len(frame.endTypes) > 0:
+			case frame.op == operators.If && len(frame.endTypes) > 0:
 				return vm, UnmatchedIfValueErr(frame.endTypes[0])
 			}
 			for _, t := range frame.endTypes {
