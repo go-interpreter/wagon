@@ -57,6 +57,14 @@ func (e InvalidLabelError) Error() string {
 	return fmt.Sprintf("invalid nesting depth %d", uint32(e))
 }
 
+// UnmatchedIfValueErr is returned if an if block returns a value, but
+// no else block is present.
+type UnmatchedIfValueErr wasm.ValueType
+
+func (e UnmatchedIfValueErr) Error() string {
+	return fmt.Sprintf("if block returns value of type %v but no else present", wasm.ValueType(e))
+}
+
 // InvalidTableIndexError is returned if a table is referenced with an
 // out-of-bounds index.
 type InvalidTableIndexError struct {
