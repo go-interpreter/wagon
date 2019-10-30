@@ -36,6 +36,20 @@ func TestReadVarUint32(t *testing.T) {
 	}
 }
 
+func TestReadVarUint64(t *testing.T) {
+	for _, c := range casesUint {
+		t.Run(fmt.Sprint(c.v), func(t *testing.T) {
+			n, err := ReadVarUint64(bytes.NewReader(c.b))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n != uint64(c.v) {
+				t.Fatalf("got = %d; want = %d", n, c.v)
+			}
+		})
+	}
+}
+
 func TestReadVarUint32Err(t *testing.T) {
 	_, err := ReadVarUint32(bytes.NewReader(nil))
 	if got, want := err, io.EOF; got != want {
@@ -192,6 +206,8 @@ func TestCompareReadVarUint(t *testing.T) {
 	}
 }
 
+// a less efficent recursive version but matches the spec defined in https://webassembly.github.io/spec/core/binary/values.html#integers
+// to make sure the correctness of readVarUint
 func readVarUintRecur(r io.Reader, n uint) (uint64, error) {
 	if n > 64 {
 		panic(errors.New("leb128: n must <= 64"))
@@ -203,10 +219,11 @@ func readVarUintRecur(r io.Reader, n uint) (uint64, error) {
 	}
 	b := uint64(p[0])
 	switch {
-	case b < 1<<7 && b < 1<<n:
+	// note: can not use b < 1<<n, when n == 64, 1<<n will overflow to 0
+	case b < 1<<7 && b <= 1<<n-1:
 		return b, nil
 	case b >= 1<<7 && n > 7:
-		m, err := readVarUint(r, n-7)
+		m, err := readVarUintRecur(r, n-7)
 		if err != nil {
 			return 0, err
 		}
@@ -217,6 +234,8 @@ func readVarUintRecur(r io.Reader, n uint) (uint64, error) {
 	}
 }
 
+// a less efficent recursive version but matches the spec defined in https://webassembly.github.io/spec/core/binary/values.html#integers
+// to make sure the correctness of readVarint
 func readVarintRecur(r io.Reader, n uint) (int64, error) {
 	if n > 64 {
 		panic(errors.New("leb128: n must <= 64"))
@@ -233,7 +252,7 @@ func readVarintRecur(r io.Reader, n uint) (int64, error) {
 	case b >= 1<<6 && b < 1<<7 && uint64(b)+1<<(n-1) >= 1<<7:
 		return b - 1<<7, nil
 	case b >= 1<<7 && n > 7:
-		m, err := readVarint(r, n-7)
+		m, err := readVarintRecur(r, n-7)
 		if err != nil {
 			return 0, err
 		}
