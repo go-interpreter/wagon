@@ -1,5 +1,7 @@
 module github.com/go-interpreter/wagon
 
+go 1.12
+
 require (
 	github.com/edsrzf/mmap-go v1.0.0
 	github.com/twitchyliquid64/golang-asm v0.0.0-20190126203739-365674df15fc

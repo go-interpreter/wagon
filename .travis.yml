@@ -16,13 +16,10 @@ matrix:
  allow_failures:
    - go: master
  include:
-   - go: 1.12.x
+   - go: 1.13.x
      env:
        - COVERAGE="-cover -race"
-   - go: 1.11.x
-     env:
-       - COVERAGE=""
-   - go: 1.10.x
+   - go: 1.12.x
      env:
        - COVERAGE=""
    - go: master
@@ -34,7 +31,8 @@ sudo: false
 
 script:
  - go get -d -t -v ./...
- - go install -v $TAGS ./...
+ - GOARCH=386   go install -v $TAGS ./...
+ - GOARCH=amd64 go install -v $TAGS ./...
  - go run ./ci/run-tests.go $COVERAGE
 
 after_success:

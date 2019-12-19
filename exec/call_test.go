@@ -13,9 +13,9 @@ import (
 )
 
 func TestHostCall(t *testing.T) {
-	const secretValue = 0xdeadbeef
+	const secretValue int64 = 0xdeadbeef
 
-	var secretVariable int
+	var secretVariable int64
 
 	// a host function that can be called by WASM code.
 	testHostFunction := func(proc *Process) {
