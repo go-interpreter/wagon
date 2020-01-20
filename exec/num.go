@@ -377,7 +377,9 @@ func (vm *VM) f32Max() {
 }
 
 func (vm *VM) f32Copysign() {
-	vm.pushFloat32(float32(math.Copysign(float64(vm.popFloat32()), float64(vm.popFloat32()))))
+	v2 := vm.popFloat32()
+	v1 := vm.popFloat32()
+	vm.pushFloat32(float32(math.Copysign(float64(v1), float64(v2))))
 }
 
 func (vm *VM) f32Eq() {
@@ -472,7 +474,9 @@ func (vm *VM) f64Max() {
 }
 
 func (vm *VM) f64Copysign() {
-	vm.pushFloat64(math.Copysign(vm.popFloat64(), vm.popFloat64()))
+	v2 := vm.popFloat64()
+	v1 := vm.popFloat64()
+	vm.pushFloat64(math.Copysign(v1, v2))
 }
 
 func (vm *VM) f64Eq() {
