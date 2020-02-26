@@ -1189,6 +1189,9 @@ func (s *LocalNames) UnmarshalWASM(r io.Reader) error {
 }
 
 func (s *LocalNames) MarshalWASM(w io.Writer) error {
+	if _, err := leb128.WriteVarUint32(w, uint32(len(s.Funcs))); err != nil {
+		return err
+	}
 	keys := make([]uint32, 0, len(s.Funcs))
 	for k := range s.Funcs {
 		keys = append(keys, k)
@@ -1235,6 +1238,9 @@ func (m NameMap) UnmarshalWASM(r io.Reader) error {
 	return nil
 }
 func (m NameMap) MarshalWASM(w io.Writer) error {
+	if _, err := leb128.WriteVarUint32(w, uint32(len(m))); err != nil {
+		return err
+	}
 	keys := make([]uint32, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
