@@ -44,7 +44,7 @@ func writeByte(w io.Writer, b byte) error {
 
 func ReadByte(r io.Reader) (byte, error) {
 	p := make([]byte, 1)
-	_, err := r.Read(p)
+	_, err := io.ReadFull(r, p)
 	return p[0], err
 }
 
