@@ -2,10 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package wast implements a WebAssembly text format.
 package wast
-
-// See https://webassembly.github.io/spec/core/text/
 
 import (
 	"bufio"
