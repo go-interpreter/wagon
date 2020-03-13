@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 
 	"github.com/go-interpreter/wagon/wasm/leb128"
 )
@@ -338,6 +339,7 @@ func (lim *ResizableLimits) UnmarshalWASM(r io.Reader) error {
 		return err
 	}
 
+	lim.Maximum = math.MaxUint32
 	if lim.Flags&0x1 != 0 {
 		m, err := leb128.ReadVarUint32(r)
 		if err != nil {

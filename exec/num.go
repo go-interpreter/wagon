@@ -5,6 +5,7 @@
 package exec
 
 import (
+	"errors"
 	"math"
 	"math/bits"
 )
@@ -34,6 +35,9 @@ func (vm *VM) i32Mul() {
 func (vm *VM) i32DivS() {
 	v2 := vm.popInt32()
 	v1 := vm.popInt32()
+	if v1 == math.MinInt32 && v2 == -1 {
+		panic(errors.New("integer overflow"))
+	}
 	vm.pushInt32(v1 / v2)
 }
 
@@ -76,19 +80,19 @@ func (vm *VM) i32Xor() {
 func (vm *VM) i32Shl() {
 	v2 := vm.popUint32()
 	v1 := vm.popUint32()
-	vm.pushUint32(v1 << v2)
+	vm.pushUint32(v1 << (v2 % 32))
 }
 
 func (vm *VM) i32ShrU() {
 	v2 := vm.popUint32()
 	v1 := vm.popUint32()
-	vm.pushUint32(v1 >> v2)
+	vm.pushUint32(v1 >> (v2 % 32))
 }
 
 func (vm *VM) i32ShrS() {
 	v2 := vm.popUint32()
 	v1 := vm.popInt32()
-	vm.pushInt32(v1 >> v2)
+	vm.pushInt32(v1 >> (v2 % 32))
 }
 
 func (vm *VM) i32Rotl() {
@@ -194,6 +198,9 @@ func (vm *VM) i64Mul() {
 func (vm *VM) i64DivS() {
 	v2 := vm.popInt64()
 	v1 := vm.popInt64()
+	if v1 == math.MinInt64 && v2 == -1 {
+		panic(errors.New("integer overflow"))
+	}
 	vm.pushInt64(v1 / v2)
 }
 
@@ -230,19 +237,19 @@ func (vm *VM) i64Xor() {
 func (vm *VM) i64Shl() {
 	v2 := vm.popUint64()
 	v1 := vm.popUint64()
-	vm.pushUint64(v1 << v2)
+	vm.pushUint64(v1 << (v2 % 64))
 }
 
 func (vm *VM) i64ShrS() {
 	v2 := vm.popUint64()
 	v1 := vm.popInt64()
-	vm.pushInt64(v1 >> v2)
+	vm.pushInt64(v1 >> (v2 % 64))
 }
 
 func (vm *VM) i64ShrU() {
 	v2 := vm.popUint64()
 	v1 := vm.popUint64()
-	vm.pushUint64(v1 >> v2)
+	vm.pushUint64(v1 >> (v2 % 64))
 }
 
 func (vm *VM) i64Rotl() {

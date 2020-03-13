@@ -19,9 +19,9 @@ func (vm *VM) fetchBaseAddr() int {
 
 // inBounds returns true when the next vm.fetchBaseAddr() + offset
 // indices are in bounds accesses to the linear memory.
-func (vm *VM) inBounds(offset int) bool {
-	addr := endianess.Uint32(vm.ctx.code[vm.ctx.pc:]) + uint32(vm.ctx.stack[len(vm.ctx.stack)-1])
-	return int(addr)+offset < len(vm.memory)
+func (vm *VM) inBounds(offset uint32) bool {
+	addr := uint64(endianess.Uint32(vm.ctx.code[vm.ctx.pc:])) + uint64(uint32(vm.ctx.stack[len(vm.ctx.stack)-1]))
+	return addr+uint64(offset) < uint64(len(vm.memory))
 }
 
 // curMem returns a slice to the memory segment pointed to by
@@ -208,7 +208,16 @@ func (vm *VM) currentMemory() {
 func (vm *VM) growMemory() {
 	_ = vm.fetchInt8() // reserved (https://github.com/WebAssembly/design/blob/27ac254c854994103c24834a994be16f74f54186/BinaryEncoding.md#memory-related-operators-described-here)
 	curLen := len(vm.memory) / wasmPageSize
-	n := vm.popInt32()
+	n := vm.popUint32()
+
+	maxMem := vm.module.Memory.Entries[0].Limits.Maximum
+	newPage := uint64(n + uint32(len(vm.memory)/wasmPageSize))
+
+	if newPage > 1<<16 || newPage > uint64(maxMem) {
+		vm.pushInt32(-1)
+		return
+	}
+
 	vm.memory = append(vm.memory, make([]byte, n*wasmPageSize)...)
 	vm.pushInt32(int32(curLen))
 }

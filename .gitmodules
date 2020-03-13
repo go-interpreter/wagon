@@ -1,0 +1,3 @@
+[submodule "tests/spectestcase"]
+	path = tests/spectestcase
+	url = https://github.com/ontio/testsuite

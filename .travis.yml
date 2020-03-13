@@ -34,6 +34,7 @@ script:
  - GOARCH=386   go install -v $TAGS ./...
  - GOARCH=amd64 go install -v $TAGS ./...
  - go run ./ci/run-tests.go $COVERAGE
+ - cd tests && bash ./run_testcase.sh
 
 after_success:
  - bash <(curl -s https://codecov.io/bash)
