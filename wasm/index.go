@@ -82,7 +82,17 @@ func (m *Module) populateFunctions() error {
 	}
 
 	// Add the functions from the wasm itself to the function list
-	numImports := len(m.FunctionIndexSpace)
+
+	// when imported module not provided, len(m.FunctionIndecSpace) == 0
+	// so must calculate number of imported funcs
+	var numImports int
+	if m.Import != nil {
+		for _, importEntry := range m.Import.Entries {
+			if importEntry.Type.Kind() == ExternalFunction {
+				numImports++
+			}
+		}
+	}
 	for codeIndex, typeIndex := range m.Function.Types {
 		if int(typeIndex) >= len(m.Types.Entries) {
 			return InvalidFunctionIndexError(typeIndex)

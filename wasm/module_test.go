@@ -264,3 +264,50 @@ func TestGetFuntionSig(t *testing.T) {
 	}
 
 }
+
+func TestFunctionName(t *testing.T) {
+	f, err := os.Open("testdata/hello-world-tinygo.wasm")
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+
+	defer f.Close()
+	m, err := wasm.ReadModule(f, nil)
+	if err != nil {
+		t.Fatalf("error reading module %v", err)
+	}
+
+	var names wasm.NameMap
+	if s := m.Custom(wasm.CustomSectionName); s != nil {
+		var nSec wasm.NameSection
+		err := nSec.UnmarshalWASM(bytes.NewReader(s.Data))
+		if err != nil {
+			t.Fatalf("error Unmarhsal NameSection %v", err)
+		}
+		if len(nSec.Types[wasm.NameFunction]) > 0 {
+			sub, err := nSec.Decode(wasm.NameFunction)
+			if err != nil {
+				t.Fatalf("error Decode NameFunction %v", err)
+			}
+			funcs, ok := sub.(*wasm.FunctionNames)
+			if ok {
+				names = funcs.Names
+			}
+		}
+	}
+
+	var numImports int
+	if m.Import != nil {
+		for _, importEntry := range m.Import.Entries {
+			if importEntry.Type.Kind() == wasm.ExternalFunction {
+				numImports++
+			}
+		}
+	}
+
+	for index, function := range m.FunctionIndexSpace {
+		if function.Name != names[uint32(index+numImports)] {
+			t.Fatalf("Err:function name expect %s, got %s", names[uint32(index+numImports)], function.Name)
+		}
+	}
+}
