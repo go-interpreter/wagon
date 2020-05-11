@@ -7,7 +7,10 @@ wagon
 
 `wagon` is a [WebAssembly](http://webassembly.org)-based interpreter in [Go](https://golang.org), for [Go](https://golang.org).
 
-**NOTE:** `wagon` requires `Go >= 1.9.x`.
+**As of 2020/05/11 Wagon is in read-only mode, and looking for a maintainer.
+You may want to look at https://github.com/mathetake/gasm instead.**
+
+---
 
 ## Purpose
 
